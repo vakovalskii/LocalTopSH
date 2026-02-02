@@ -57,6 +57,7 @@ export interface ToolResult {
 export interface ToolContext {
   cwd: string;
   sessionId?: string;
+  chatId?: number;
   zaiApiKey?: string;
   tavilyApiKey?: string;
 }
@@ -71,7 +72,7 @@ export async function execute(
   
   switch (name) {
     case 'run_command':
-      return bash.execute(args as any, { cwd: ctx.cwd, sessionId: ctx.sessionId });
+      return bash.execute(args as any, { cwd: ctx.cwd, sessionId: ctx.sessionId, chatId: ctx.chatId });
     
     case 'read_file':
       return files.executeRead(args as any, ctx.cwd);

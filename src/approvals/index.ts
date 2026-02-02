@@ -1,14 +1,16 @@
 /**
  * Exec Approvals - confirmation for dangerous commands
+ * Non-blocking architecture: save command, execute on approve
  */
 
-export interface PendingApproval {
+export interface PendingCommand {
   id: string;
   sessionId: string;
+  chatId: number;
   command: string;
+  cwd: string;
   reason: string;
   createdAt: number;
-  resolve: (approved: boolean) => void;
 }
 
 // Dangerous command patterns
@@ -82,11 +84,11 @@ const DANGEROUS_PATTERNS: { pattern: RegExp; reason: string }[] = [
   { pattern: /while\s+true.*do.*done/, reason: 'Infinite loop' },
 ];
 
-// In-memory storage for pending approvals
-const pendingApprovals = new Map<string, PendingApproval>();
+// In-memory storage for pending commands
+const pendingCommands = new Map<string, PendingCommand>();
 
-// Approval timeout (60 seconds - must be less than Telegraf's 90s timeout)
-const APPROVAL_TIMEOUT = 60 * 1000;
+// Timeout for pending commands (5 minutes)
+const COMMAND_TIMEOUT = 5 * 60 * 1000;
 
 /**
  * Check if command is dangerous
@@ -101,77 +103,58 @@ export function checkCommand(command: string): { dangerous: boolean; reason?: st
 }
 
 /**
- * Request approval for a command
- * Returns a promise that resolves when user approves/denies
+ * Store a pending command for later approval
+ * Returns ID for the approval buttons
  */
-export function requestApproval(
+export function storePendingCommand(
   sessionId: string,
+  chatId: number,
   command: string,
+  cwd: string,
   reason: string
-): { id: string; promise: Promise<boolean> } {
-  const id = `approval_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+): string {
+  const id = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   
-  let resolveFunc: (approved: boolean) => void;
-  
-  const promise = new Promise<boolean>((resolve) => {
-    resolveFunc = resolve;
-    
-    // Auto-deny after timeout
-    setTimeout(() => {
-      if (pendingApprovals.has(id)) {
-        pendingApprovals.delete(id);
-        resolve(false);
-      }
-    }, APPROVAL_TIMEOUT);
-  });
-  
-  pendingApprovals.set(id, {
+  pendingCommands.set(id, {
     id,
     sessionId,
+    chatId,
     command,
+    cwd,
     reason,
     createdAt: Date.now(),
-    resolve: resolveFunc!,
   });
   
-  return { id, promise };
-}
-
-/**
- * Handle approval decision
- */
-export function handleApproval(id: string, approved: boolean): boolean {
-  const pending = pendingApprovals.get(id);
-  if (!pending) return false;
+  // Auto-cleanup after timeout
+  setTimeout(() => {
+    pendingCommands.delete(id);
+  }, COMMAND_TIMEOUT);
   
-  pendingApprovals.delete(id);
-  pending.resolve(approved);
-  return true;
+  return id;
 }
 
 /**
- * Get pending approval by ID
+ * Get pending command by ID and remove it
  */
-export function getPendingApproval(id: string): PendingApproval | undefined {
-  return pendingApprovals.get(id);
-}
-
-/**
- * Get all pending approvals for a session
- */
-export function getSessionApprovals(sessionId: string): PendingApproval[] {
-  return Array.from(pendingApprovals.values())
-    .filter(a => a.sessionId === sessionId);
-}
-
-/**
- * Cancel all pending approvals for a session
- */
-export function cancelSessionApprovals(sessionId: string): void {
-  for (const [id, approval] of pendingApprovals) {
-    if (approval.sessionId === sessionId) {
-      approval.resolve(false);
-      pendingApprovals.delete(id);
-    }
+export function consumePendingCommand(id: string): PendingCommand | undefined {
+  const cmd = pendingCommands.get(id);
+  if (cmd) {
+    pendingCommands.delete(id);
   }
+  return cmd;
+}
+
+/**
+ * Get all pending commands for a session
+ */
+export function getSessionPendingCommands(sessionId: string): PendingCommand[] {
+  return Array.from(pendingCommands.values())
+    .filter(c => c.sessionId === sessionId);
+}
+
+/**
+ * Cancel pending command
+ */
+export function cancelPendingCommand(id: string): boolean {
+  return pendingCommands.delete(id);
 }

@@ -66,7 +66,7 @@ if (mode === 'gateway') {
     { command: 'start', description: 'Start / Help' },
     { command: 'clear', description: 'Clear session history' },
     { command: 'status', description: 'Show status' },
-    { command: 'approvals', description: 'Pending command approvals' },
+    { command: 'pending', description: 'Pending commands to approve' },
   ]);
   
   bot.launch();

@@ -6,22 +6,23 @@
  */
 
 import { execSync, spawn } from 'child_process';
-import { checkCommand, requestApproval } from '../approvals/index.js';
+import { checkCommand, storePendingCommand } from '../approvals/index.js';
 
-// Callback for requesting approval from user
-let approvalCallback: ((
-  sessionId: string,
+// Callback for showing approval buttons (non-blocking)
+let showApprovalCallback: ((
+  chatId: number,
+  commandId: string,
   command: string,
   reason: string
-) => Promise<boolean>) | null = null;
+) => void) | null = null;
 
 /**
- * Set the approval callback (called from bot)
+ * Set the callback to show approval buttons
  */
 export function setApprovalCallback(
-  callback: (sessionId: string, command: string, reason: string) => Promise<boolean>
+  callback: (chatId: number, commandId: string, command: string, reason: string) => void
 ) {
-  approvalCallback = callback;
+  showApprovalCallback = callback;
 }
 
 export const definition = {
@@ -45,6 +46,7 @@ export const definition = {
 export interface ExecuteContext {
   cwd: string;
   sessionId?: string;
+  chatId?: number;
 }
 
 export async function execute(
@@ -55,6 +57,7 @@ export async function execute(
   const context: ExecuteContext = typeof cwd === 'string' ? { cwd } : cwd;
   const workDir = context.cwd;
   const sessionId = context.sessionId || 'default';
+  const chatId = context.chatId || 0;
   
   // Check if command is dangerous
   const { dangerous, reason } = checkCommand(args.command);
@@ -63,41 +66,42 @@ export async function execute(
     console.log(`[SECURITY] Dangerous command detected: ${args.command}`);
     console.log(`[SECURITY] Reason: ${reason}`);
     
-    // If no approval callback, deny by default
-    if (!approvalCallback) {
-      return {
-        success: false,
-        error: `⚠️ BLOCKED: This command requires approval (${reason}) but no approval mechanism is configured.`,
-        approval_required: true,
-      };
+    // Store command and show approval buttons
+    const commandId = storePendingCommand(sessionId, chatId, args.command, workDir, reason!);
+    
+    // Show buttons (non-blocking)
+    if (showApprovalCallback && chatId) {
+      showApprovalCallback(chatId, commandId, args.command, reason!);
     }
     
-    // Request approval from user
-    const approved = await approvalCallback(sessionId, args.command, reason!);
-    
-    if (!approved) {
-      return {
-        success: false,
-        error: `❌ Command denied by user. Reason flagged: ${reason}`,
-        approval_required: true,
-      };
-    }
-    
-    console.log(`[SECURITY] Command approved by user`);
+    return {
+      success: false,
+      error: `⚠️ APPROVAL REQUIRED: "${reason}"\n\nWaiting for user to click Approve/Deny button.`,
+      approval_required: true,
+    };
   }
   
+  return executeCommand(args.command, workDir);
+}
+
+/**
+ * Execute a command (used for both regular and approved commands)
+ */
+export function executeCommand(
+  command: string,
+  cwd: string
+): { success: boolean; output?: string; error?: string } {
   // Check if command should run in background
-  const isBackground = /&\s*$/.test(args.command.trim()) || 
-                       args.command.includes('nohup');
+  const isBackground = /&\s*$/.test(command.trim()) || command.includes('nohup');
   
   // Execute background commands with spawn (non-blocking)
   if (isBackground) {
     try {
       // Remove trailing & for spawn
-      const cleanCmd = args.command.trim().replace(/&\s*$/, '').trim();
+      const cleanCmd = command.trim().replace(/&\s*$/, '').trim();
       
       const child = spawn('sh', ['-c', cleanCmd], {
-        cwd: workDir,
+        cwd,
         detached: true,
         stdio: 'ignore',
       });
@@ -118,8 +122,8 @@ export async function execute(
   
   // Execute regular commands with execSync (blocking)
   try {
-    const output = execSync(args.command, {
-      cwd: workDir,
+    const output = execSync(command, {
+      cwd,
       encoding: 'utf-8',
       timeout: 180000, // 3 min
       maxBuffer: 1024 * 1024 * 10,

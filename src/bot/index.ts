@@ -1,12 +1,17 @@
 /**
  * Telegram Bot - interface to ReAct Agent
- * Features: groups, reply, traces, exec approvals
+ * Features: groups, reply, traces, exec approvals (non-blocking)
  */
 
 import { Telegraf, Context } from 'telegraf';
 import { ReActAgent } from '../agent/react.js';
 import { toolNames, setApprovalCallback, setAskCallback } from '../tools/index.js';
-import { requestApproval, handleApproval, cancelSessionApprovals, getSessionApprovals } from '../approvals/index.js';
+import { executeCommand } from '../tools/bash.js';
+import { 
+  consumePendingCommand, 
+  cancelPendingCommand, 
+  getSessionPendingCommands 
+} from '../approvals/index.js';
 
 // Pending user questions (ask_user tool)
 interface PendingQuestion {
@@ -24,7 +29,7 @@ export interface BotConfig {
   zaiApiKey?: string;
   tavilyApiKey?: string;
   allowedUsers?: number[];
-  exposedPorts?: number[];  // ports accessible from external network
+  exposedPorts?: number[];
 }
 
 // Escape HTML
@@ -40,19 +45,14 @@ function convertTable(tableText: string): string {
   const lines = tableText.trim().split('\n');
   if (lines.length < 2) return tableText;
   
-  // Parse header
   const headerCells = lines[0].split('|').map(c => c.trim()).filter(c => c);
-  
-  // Skip separator line (|---|---|)
   const dataLines = lines.slice(2);
   
-  // Convert each row to list item
   const result: string[] = [];
   for (const line of dataLines) {
     const cells = line.split('|').map(c => c.trim()).filter(c => c);
     if (cells.length === 0) continue;
     
-    // Format: "• Header1: Value1 | Header2: Value2"
     const parts = cells.map((cell, i) => {
       const header = headerCells[i] || '';
       return header ? `${header}: ${cell}` : cell;
@@ -65,7 +65,6 @@ function convertTable(tableText: string): string {
 
 // Markdown → Telegram HTML
 function mdToHtml(text: string): string {
-  // 1. Extract code blocks first
   const codeBlocks: string[] = [];
   let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
     const idx = codeBlocks.length;
@@ -73,13 +72,10 @@ function mdToHtml(text: string): string {
     return `__CODE_BLOCK_${idx}__`;
   });
   
-  // 2. Convert tables to list format (before escaping)
-  // Match table pattern: lines starting with |
   result = result.replace(/(?:^\|.+\|$\n?)+/gm, (table) => {
     return convertTable(table);
   });
   
-  // 3. Extract inline code
   const inlineCode: string[] = [];
   result = result.replace(/`([^`]+)`/g, (_, code) => {
     const idx = inlineCode.length;
@@ -87,10 +83,8 @@ function mdToHtml(text: string): string {
     return `__INLINE_CODE_${idx}__`;
   });
   
-  // 4. Escape HTML
   result = escapeHtml(result);
   
-  // 5. Restore code blocks and inline code
   codeBlocks.forEach((block, i) => {
     result = result.replace(`__CODE_BLOCK_${i}__`, block);
   });
@@ -98,7 +92,6 @@ function mdToHtml(text: string): string {
     result = result.replace(`__INLINE_CODE_${i}__`, code);
   });
   
-  // 6. Convert markdown formatting
   result = result
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
     .replace(/\*(.+?)\*/g, '<i>$1</i>')
@@ -149,7 +142,7 @@ export function createBot(config: BotConfig) {
   const bot = new Telegraf(config.telegramToken);
   let botUsername = '';
   
-  // Session to chatId mapping (for sending approval requests)
+  // Session to chatId mapping
   const sessionChats = new Map<string, number>();
   
   bot.telegram.getMe().then(me => {
@@ -167,52 +160,30 @@ export function createBot(config: BotConfig) {
     exposedPorts: config.exposedPorts,
   });
   
-  // Set up approval callback for dangerous commands
-  setApprovalCallback(async (sessionId, command, reason) => {
-    console.log(`[approval] Requesting approval for session ${sessionId}`);
+  // Set up NON-BLOCKING approval callback - just shows buttons
+  setApprovalCallback((chatId, commandId, command, reason) => {
+    console.log(`[approval] Showing buttons for command ${commandId}`);
     console.log(`[approval] Command: ${command}`);
     console.log(`[approval] Reason: ${reason}`);
     
-    const chatId = sessionChats.get(sessionId);
-    if (!chatId) {
-      console.log(`[approval] ERROR: No chat found for session ${sessionId}`);
-      console.log(`[approval] Available sessions:`, Array.from(sessionChats.keys()));
-      return false;
-    }
-    
-    const { id, promise } = requestApproval(sessionId, command, reason);
-    console.log(`[approval] Created approval request with ID: ${id}`);
-    
-    // Send approval request with inline keyboard
-    const message = `⚠️ <b>Dangerous Command Detected</b>\n\n` +
+    const message = `⚠️ <b>Approval Required</b>\n\n` +
       `<b>Reason:</b> ${escapeHtml(reason)}\n\n` +
       `<pre>${escapeHtml(command)}</pre>\n\n` +
-      `Do you want to execute this command?`;
+      `Click to execute or deny:`;
     
-    const callbackData = {
-      approve: `approve:${id}`,
-      deny: `deny:${id}`,
-    };
-    console.log(`[approval] Callback data:`, callbackData);
-    
-    try {
-      const sent = await bot.telegram.sendMessage(chatId, message, {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Approve', callback_data: callbackData.approve },
-            { text: '❌ Deny', callback_data: callbackData.deny },
-          ]],
-        },
-      });
-      console.log(`[approval] Message sent, message_id: ${sent.message_id}`);
-    } catch (e) {
-      console.error('[approval] Failed to send approval request:', e);
-      return false;
-    }
-    
-    console.log(`[approval] Waiting for user response (60s timeout)...`);
-    return promise;
+    bot.telegram.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Execute', callback_data: `exec:${commandId}` },
+          { text: '❌ Deny', callback_data: `deny:${commandId}` },
+        ]],
+      },
+    }).then(sent => {
+      console.log(`[approval] Message sent, id: ${sent.message_id}`);
+    }).catch(e => {
+      console.error('[approval] Failed to send:', e);
+    });
   });
   
   // Set up ask callback for ask_user tool
@@ -224,12 +195,10 @@ export function createBot(config: BotConfig) {
     
     const id = `ask_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
-    // Create promise that resolves when user clicks a button
     const promise = new Promise<string>((resolve, reject) => {
-      // Timeout after 2 minutes
       const timeout = setTimeout(() => {
         pendingQuestions.delete(id);
-        reject(new Error('Question timeout - no response'));
+        reject(new Error('Question timeout'));
       }, 2 * 60 * 1000);
       
       pendingQuestions.set(id, {
@@ -242,7 +211,6 @@ export function createBot(config: BotConfig) {
       });
     });
     
-    // Create inline keyboard with options
     const keyboard = options.map((opt, i) => [{
       text: opt,
       callback_data: `ask:${id}:${i}`,
@@ -256,48 +224,93 @@ export function createBot(config: BotConfig) {
     return promise;
   });
   
-  // Handle approval buttons (approve:id or deny:id)
-  bot.action(/^(approve|deny):(.+)$/, async (ctx) => {
+  // Handle EXECUTE button - runs the command
+  bot.action(/^exec:(.+)$/, async (ctx) => {
+    const commandId = ctx.match[1];
+    console.log(`[callback] Execute clicked for ${commandId}`);
+    
     try {
-      const match = ctx.match;
-      const action = match[1];
-      const id = match[2];
+      const pending = consumePendingCommand(commandId);
       
-      console.log(`[callback] Received ${action} for ${id}`);
-      
-      const approved = action === 'approve';
-      const handled = handleApproval(id, approved);
-      
-      if (handled) {
-        const statusText = approved 
-          ? '✅ <b>Command Approved</b>' 
-          : '❌ <b>Command Denied</b>';
-        
+      if (!pending) {
+        await ctx.answerCbQuery('Command expired or already handled').catch(() => {});
         try {
-          await ctx.editMessageText(statusText, { parse_mode: 'HTML' });
+          await ctx.editMessageText('⏳ <i>Command expired</i>', { parse_mode: 'HTML' });
         } catch {}
-        
-        await ctx.answerCbQuery(approved ? 'Command approved' : 'Command denied').catch(() => {});
-        console.log(`[callback] ${action} handled successfully`);
-      } else {
-        await ctx.answerCbQuery('This approval has expired').catch(() => {});
-        console.log(`[callback] ${action} expired or already handled`);
+        return;
       }
-    } catch (e) {
-      console.error('[callback] Error:', e);
-      await ctx.answerCbQuery('Error processing').catch(() => {});
+      
+      // Update message to show executing
+      try {
+        await ctx.editMessageText(
+          `⏳ <b>Executing...</b>\n\n<pre>${escapeHtml(pending.command)}</pre>`,
+          { parse_mode: 'HTML' }
+        );
+      } catch {}
+      
+      await ctx.answerCbQuery('Executing...').catch(() => {});
+      
+      // Actually execute the command
+      console.log(`[callback] Running: ${pending.command} in ${pending.cwd}`);
+      const result = executeCommand(pending.command, pending.cwd);
+      
+      // Show result
+      const output = result.success 
+        ? (result.output || '(empty output)')
+        : `Error: ${result.error}`;
+      
+      const trimmedOutput = output.length > 3000 
+        ? output.slice(0, 1500) + '\n...\n' + output.slice(-1000)
+        : output;
+      
+      const statusEmoji = result.success ? '✅' : '❌';
+      const finalMessage = `${statusEmoji} <b>Command ${result.success ? 'Executed' : 'Failed'}</b>\n\n` +
+        `<pre>${escapeHtml(pending.command)}</pre>\n\n` +
+        `<b>Output:</b>\n<pre>${escapeHtml(trimmedOutput)}</pre>`;
+      
+      try {
+        await ctx.editMessageText(finalMessage, { parse_mode: 'HTML' });
+      } catch {
+        // Message too long, send as new
+        await ctx.telegram.sendMessage(pending.chatId, finalMessage, { parse_mode: 'HTML' });
+      }
+      
+      console.log(`[callback] Command executed, success: ${result.success}`);
+      
+    } catch (e: any) {
+      console.error('[callback] Error executing:', e);
+      await ctx.answerCbQuery('Error executing command').catch(() => {});
     }
   });
   
-  // Handle ask_user buttons (ask:id:index)
-  bot.action(/^ask:(.+):(\d+)$/, async (ctx) => {
+  // Handle DENY button
+  bot.action(/^deny:(.+)$/, async (ctx) => {
+    const commandId = ctx.match[1];
+    console.log(`[callback] Deny clicked for ${commandId}`);
+    
     try {
-      const match = ctx.match;
-      const id = match[1];
-      const optionIndex = parseInt(match[2]);
+      const cancelled = cancelPendingCommand(commandId);
       
-      console.log(`[callback] Received ask response for ${id}, option ${optionIndex}`);
+      try {
+        await ctx.editMessageText('❌ <b>Command Denied</b>', { parse_mode: 'HTML' });
+      } catch {}
       
+      await ctx.answerCbQuery(cancelled ? 'Command denied' : 'Already handled').catch(() => {});
+      
+    } catch (e: any) {
+      console.error('[callback] Error:', e);
+      await ctx.answerCbQuery('Error').catch(() => {});
+    }
+  });
+  
+  // Handle ask_user buttons
+  bot.action(/^ask:(.+):(\d+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    const optionIndex = parseInt(ctx.match[2]);
+    
+    console.log(`[callback] Ask response for ${id}, option ${optionIndex}`);
+    
+    try {
       const pending = pendingQuestions.get(id);
       
       if (pending) {
@@ -312,11 +325,11 @@ export function createBot(config: BotConfig) {
         
         await ctx.answerCbQuery(`Selected: ${selectedText}`).catch(() => {});
       } else {
-        await ctx.answerCbQuery('This question has expired').catch(() => {});
+        await ctx.answerCbQuery('Question expired').catch(() => {});
       }
     } catch (e) {
       console.error('[callback] Error:', e);
-      await ctx.answerCbQuery('Error processing').catch(() => {});
+      await ctx.answerCbQuery('Error').catch(() => {});
     }
   });
   
@@ -329,37 +342,33 @@ export function createBot(config: BotConfig) {
     const isPrivate = chatType === 'private';
     const isGroup = chatType === 'group' || chatType === 'supergroup';
     
-    // Private chat - always respond
     if (isPrivate) {
       return { respond: true, text: msg.text };
     }
     
-    // Group chat - only respond to @mention or reply to bot
     if (isGroup && botUsername) {
       const replyToBot = msg.reply_to_message?.from?.username === botUsername;
       const mentionsBot = msg.text.includes(`@${botUsername}`);
       
       if (replyToBot || mentionsBot) {
-        // Remove @mention from text
         const cleanText = msg.text.replace(new RegExp(`@${botUsername}\\s*`, 'gi'), '').trim();
         return { respond: true, text: cleanText || msg.text };
       }
       
-      // Group message without mention/reply - ignore
       return { respond: false, text: '' };
     }
     
     return { respond: false, text: '' };
   }
   
-  // Debug middleware - log all updates
+  // Debug middleware
   bot.use(async (ctx, next) => {
     const updateType = ctx.updateType;
-    console.log(`[telegram] Update type: ${updateType}`);
+    console.log(`[telegram] Update: ${updateType}`);
     
     if (updateType === 'callback_query') {
       const data = (ctx.callbackQuery as any)?.data;
-      console.log(`[telegram] Callback query data: ${data}`);
+      console.log(`[telegram] Callback data: ${data}`);
     }
     
     return next();
@@ -390,7 +399,7 @@ export function createBot(config: BotConfig) {
       (chatType !== 'private' ? `💬 In groups: @${botUsername} or reply\n\n` : '') +
       `/clear - Reset session\n` +
       `/status - Status\n` +
-      `/approvals - Pending approvals`;
+      `/pending - Pending commands`;
     await ctx.reply(msg, { parse_mode: 'HTML' });
   });
   
@@ -398,7 +407,6 @@ export function createBot(config: BotConfig) {
   bot.command('clear', async (ctx) => {
     const id = ctx.from?.id?.toString();
     if (id) {
-      cancelSessionApprovals(id);
       agent.clear(id);
       await ctx.reply('🗑 Session cleared');
     }
@@ -410,37 +418,37 @@ export function createBot(config: BotConfig) {
     if (!id) return;
     
     const info = agent.getInfo(id);
-    const pending = getSessionApprovals(id);
+    const pending = getSessionPendingCommands(id);
     const msg = `<b>📊 Status</b>\n` +
       `Model: <code>${config.model}</code>\n` +
       `History: ${info.messages} msgs\n` +
       `Tools: ${info.tools}\n` +
-      `🛡️ Exec Approvals: ${pending.length} pending`;
+      `🛡️ Pending commands: ${pending.length}`;
     await ctx.reply(msg, { parse_mode: 'HTML' });
   });
   
-  // /approvals - show pending approvals
-  bot.command('approvals', async (ctx) => {
+  // /pending - show pending commands
+  bot.command('pending', async (ctx) => {
     const id = ctx.from?.id?.toString();
     if (!id) return;
     
-    const pending = getSessionApprovals(id);
+    const pending = getSessionPendingCommands(id);
     if (pending.length === 0) {
-      await ctx.reply('✅ No pending approvals');
+      await ctx.reply('✅ No pending commands');
       return;
     }
     
-    for (const approval of pending) {
-      const message = `⏳ <b>Pending Approval</b>\n\n` +
-        `<b>Reason:</b> ${escapeHtml(approval.reason)}\n\n` +
-        `<pre>${escapeHtml(approval.command)}</pre>`;
+    for (const cmd of pending) {
+      const message = `⏳ <b>Pending Command</b>\n\n` +
+        `<b>Reason:</b> ${escapeHtml(cmd.reason)}\n\n` +
+        `<pre>${escapeHtml(cmd.command)}</pre>`;
       
       await ctx.reply(message, {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [[
-            { text: '✅ Approve', callback_data: `approve:${approval.id}` },
-            { text: '❌ Deny', callback_data: `deny:${approval.id}` },
+            { text: '✅ Execute', callback_data: `exec:${cmd.id}` },
+            { text: '❌ Deny', callback_data: `deny:${cmd.id}` },
           ]],
         },
       });
@@ -457,20 +465,21 @@ export function createBot(config: BotConfig) {
     
     const sessionId = userId.toString();
     const messageId = ctx.message.message_id;
+    const chatId = ctx.chat.id;
     
     // Save chat ID for approval requests
-    sessionChats.set(sessionId, ctx.chat.id);
+    sessionChats.set(sessionId, chatId);
     
     console.log(`[bot] ${userId}: ${text.slice(0, 50)}...`);
     
     await ctx.sendChatAction('typing');
     const typing = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
     
-    // Status message with traces
     let statusMsg: any = null;
     const traces: string[] = [];
     
     try {
+      // Pass chatId to agent for approval callbacks
       const response = await agent.run(sessionId, text, async (toolName) => {
         const emoji = toolEmoji(toolName);
         traces.push(`${emoji} ${toolName}`);
@@ -480,33 +489,30 @@ export function createBot(config: BotConfig) {
         try {
           if (statusMsg) {
             await ctx.telegram.editMessageText(
-              ctx.chat.id, 
+              chatId, 
               statusMsg.message_id, 
               undefined, 
               statusText, 
               { parse_mode: 'HTML' }
             );
           } else {
-            // Reply to user's message
             statusMsg = await ctx.reply(statusText, { 
               parse_mode: 'HTML',
               reply_parameters: { message_id: messageId }
             });
           }
         } catch {}
-      });
+      }, chatId);  // <-- pass chatId
       
       clearInterval(typing);
       
-      // Delete status message
       if (statusMsg) {
         try { 
-          await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id); 
+          await ctx.telegram.deleteMessage(chatId, statusMsg.message_id); 
         } catch {}
       }
       
-      // Send response as reply to user
-      const finalResponse = response || '(no response from model)';
+      const finalResponse = response || '(no response)';
       const html = mdToHtml(finalResponse);
       const parts = splitMessage(html);
       
@@ -517,7 +523,6 @@ export function createBot(config: BotConfig) {
             reply_parameters: i === 0 ? { message_id: messageId } : undefined
           });
         } catch {
-          // Fallback to plain text
           await ctx.reply(finalResponse.slice(0, 4000), {
             reply_parameters: i === 0 ? { message_id: messageId } : undefined
           });

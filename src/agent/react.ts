@@ -112,7 +112,8 @@ Use these ports when creating web servers, APIs, etc.
   async run(
     sessionId: string,
     userMessage: string,
-    onToolCall?: (name: string) => void
+    onToolCall?: (name: string) => void,
+    chatId?: number
   ): Promise<string> {
     const session = this.getSession(sessionId);
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -213,6 +214,7 @@ Use these ports when creating web servers, APIs, etc.
           const result = await tools.execute(name, args, {
             cwd: this.config.cwd,
             sessionId,
+            chatId,
             zaiApiKey: this.config.zaiApiKey,
             tavilyApiKey: this.config.tavilyApiKey,
           });
