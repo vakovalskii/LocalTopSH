@@ -726,6 +726,37 @@ export function createBot(config: BotConfig) {
     console.log('[thought] Autonomous messages enabled (10-30 min interval)');
   }
   
+  // Track reactions to bot's messages
+  bot.on('message_reaction', async (ctx) => {
+    try {
+      const update = ctx.update as any;
+      const reaction = update.message_reaction;
+      if (!reaction) return;
+      
+      // Get reaction info
+      const chatId = reaction.chat?.id;
+      const userId = reaction.user?.id;
+      const username = reaction.user?.username || reaction.user?.first_name || 'anon';
+      const newReactions = reaction.new_reaction || [];
+      const oldReactions = reaction.old_reaction || [];
+      
+      // Find what reaction was added
+      const addedEmojis = newReactions
+        .filter((r: any) => r.type === 'emoji')
+        .map((r: any) => r.emoji);
+      
+      if (addedEmojis.length > 0) {
+        const emoji = addedEmojis.join('');
+        console.log(`[reaction-received] ${username} reacted ${emoji}`);
+        
+        // Save to chat history
+        saveChatMessage(username, `отреагировал ${emoji}`, false);
+      }
+    } catch (e) {
+      // Ignore reaction errors
+    }
+  });
+  
   // React to messages in groups (even if not addressed to bot)
   bot.on('text', async (ctx, next) => {
     const msg = ctx.message;
