@@ -129,9 +129,10 @@ export function executeCommand(
       maxBuffer: 1024 * 1024 * 10,
     });
     
-    // Limit output to prevent context overflow
-    const trimmed = output.length > 10000 
-      ? output.slice(0, 5000) + '\n...(truncated)...\n' + output.slice(-3000)
+    // Limit output to prevent context overflow and rate limits
+    const maxOutput = 4000;
+    const trimmed = output.length > maxOutput 
+      ? output.slice(0, 2000) + '\n\n...(truncated ' + (output.length - maxOutput) + ' chars)...\n\n' + output.slice(-1500)
       : output;
     
     return { success: true, output: trimmed || "(empty output)" };

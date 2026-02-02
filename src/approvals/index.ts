@@ -82,6 +82,11 @@ const DANGEROUS_PATTERNS: { pattern: RegExp; reason: string }[] = [
   // Fork bomb / resource exhaustion
   { pattern: /:\(\)\s*{\s*:\|:&\s*}/, reason: 'Fork bomb' },
   { pattern: /while\s+true.*do.*done/, reason: 'Infinite loop' },
+  
+  // Resource-heavy commands
+  { pattern: /\bfind\s+\/\s/, reason: 'Full filesystem scan (very slow)' },
+  { pattern: /\bdu\s+-[ash]*\s+\/\s*$/, reason: 'Full disk usage scan' },
+  { pattern: /\bls\s+-[laR]*\s+\/\s*$/, reason: 'Full filesystem listing' },
 ];
 
 // In-memory storage for pending commands

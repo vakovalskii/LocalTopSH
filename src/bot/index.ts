@@ -545,10 +545,22 @@ export function createBot(config: BotConfig) {
     } catch (e: any) {
       clearInterval(typing);
       console.error('[bot] Error:', e);
-      await ctx.reply(`❌ ${e.message}`, {
-        reply_parameters: { message_id: messageId }
-      });
+      
+      // Try to send error, but don't crash if rate limited
+      try {
+        await ctx.reply(`❌ ${e.message?.slice(0, 200)}`, {
+          reply_parameters: { message_id: messageId }
+        });
+      } catch (sendErr: any) {
+        console.error('[bot] Failed to send error:', sendErr.message);
+      }
     }
+  });
+  
+  // Global error handler - prevent crashes
+  bot.catch((err: any, ctx) => {
+    console.error('[bot] Unhandled error:', err.message);
+    // Don't try to reply - might cause more rate limits
   });
   
   return bot;
