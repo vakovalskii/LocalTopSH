@@ -64,18 +64,30 @@ export class ReActAgent {
   private getSystemPrompt(): string {
     let prompt = readFileSync(SYSTEM_PROMPT_FILE, 'utf-8');
     
+    // Extract userId from cwd path (e.g., /workspace/123456789 -> 123456789)
+    const cwdParts = this.config.cwd.split('/');
+    const userIdStr = cwdParts[cwdParts.length - 1];
+    const userId = parseInt(userIdStr) || 0;
+    
+    // Calculate user's port range (each user gets 10 ports)
+    // Base port 4000, user index = hash of ID mod 100
+    const userIndex = userId % 100;
+    const basePort = 4000 + (userIndex * 10);
+    const userPorts = `${basePort}-${basePort + 9}`;
+    
     // Replace placeholders
     prompt = prompt
       .replace('{{cwd}}', this.config.cwd)
       .replace('{{date}}', new Date().toISOString().slice(0, 10))
-      .replace('{{tools}}', tools.toolNames.join(', '));
+      .replace('{{tools}}', tools.toolNames.join(', '))
+      .replace('{{userPorts}}', userPorts);
     
     // Add exposed ports info
     if (this.config.exposedPorts?.length) {
       prompt += `\n\n<NETWORK>
-Exposed ports (accessible from external network):
-${this.config.exposedPorts.map(p => `- Port ${p}`).join('\n')}
-Use these ports when creating web servers, APIs, etc.
+External access via: http://HOST_IP:PORT
+Your port range: ${userPorts}
+Check if port free: lsof -i :PORT or netstat -tlnp | grep PORT
 </NETWORK>`;
     }
     

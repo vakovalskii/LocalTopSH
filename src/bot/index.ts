@@ -142,6 +142,7 @@ function toolEmoji(name: string): string {
 export function createBot(config: BotConfig) {
   const bot = new Telegraf(config.telegramToken);
   let botUsername = '';
+  let botId = 0;
   
   // Session to chatId mapping
   const sessionChats = new Map<string, number>();
@@ -151,7 +152,8 @@ export function createBot(config: BotConfig) {
   
   bot.telegram.getMe().then(me => {
     botUsername = me.username || '';
-    console.log(`[bot] @${botUsername}`);
+    botId = me.id;
+    console.log(`[bot] @${botUsername} (${botId})`);
   });
   
   // Get or create agent for user (with personal workspace)
@@ -367,12 +369,21 @@ export function createBot(config: BotConfig) {
       return { respond: true, text: msg.text };
     }
     
-    if (isGroup && botUsername) {
-      const replyToBot = msg.reply_to_message?.from?.username === botUsername;
-      const mentionsBot = msg.text.includes(`@${botUsername}`);
+    if (isGroup) {
+      // Check reply to bot (by ID or username)
+      const replyMsg = msg.reply_to_message;
+      const replyToBot = replyMsg?.from?.id === botId || 
+                         replyMsg?.from?.username === botUsername;
+      
+      // Check @mention
+      const mentionsBot = botUsername && msg.text.includes(`@${botUsername}`);
+      
+      console.log(`[group] reply_to: ${replyMsg?.from?.id}/${replyMsg?.from?.username}, mention: ${mentionsBot}, botId: ${botId}`);
       
       if (replyToBot || mentionsBot) {
-        const cleanText = msg.text.replace(new RegExp(`@${botUsername}\\s*`, 'gi'), '').trim();
+        const cleanText = botUsername 
+          ? msg.text.replace(new RegExp(`@${botUsername}\\s*`, 'gi'), '').trim()
+          : msg.text;
         return { respond: true, text: cleanText || msg.text };
       }
       

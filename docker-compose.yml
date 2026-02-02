@@ -9,10 +9,8 @@ services:
     volumes:
       - ./workspace:/workspace
     ports:
-      # Ports for agent-created services (web servers, APIs, etc.)
-      - "3000:3000"
-      - "5000:5000"
-      - "8080:8080"
+      # User port range (4000-4999, each user gets 10 ports based on ID % 100)
+      - "4000-4999:4000-4999"
     networks:
       - agent-net
 
