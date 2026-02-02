@@ -5,8 +5,15 @@
 
 import { Telegraf, Context } from 'telegraf';
 import { ReActAgent } from '../agent/react.js';
-import { toolNames, setApprovalCallback } from '../tools/index.js';
+import { toolNames, setApprovalCallback, setAskCallback } from '../tools/index.js';
 import { requestApproval, handleApproval, cancelSessionApprovals, getSessionApprovals } from '../approvals/index.js';
+
+// Pending user questions (ask_user tool)
+interface PendingQuestion {
+  id: string;
+  resolve: (answer: string) => void;
+}
+const pendingQuestions = new Map<string, PendingQuestion>();
 
 export interface BotConfig {
   telegramToken: string;
@@ -194,11 +201,77 @@ export function createBot(config: BotConfig) {
     return promise;
   });
   
-  // Handle approval/deny callbacks
+  // Set up ask callback for ask_user tool
+  setAskCallback(async (sessionId, question, options) => {
+    const chatId = sessionChats.get(sessionId);
+    if (!chatId) {
+      throw new Error('No chat found for session');
+    }
+    
+    const id = `ask_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    
+    // Create promise that resolves when user clicks a button
+    const promise = new Promise<string>((resolve, reject) => {
+      // Timeout after 2 minutes
+      const timeout = setTimeout(() => {
+        pendingQuestions.delete(id);
+        reject(new Error('Question timeout - no response'));
+      }, 2 * 60 * 1000);
+      
+      pendingQuestions.set(id, {
+        id,
+        resolve: (answer) => {
+          clearTimeout(timeout);
+          pendingQuestions.delete(id);
+          resolve(answer);
+        },
+      });
+    });
+    
+    // Create inline keyboard with options
+    const keyboard = options.map((opt, i) => [{
+      text: opt,
+      callback_data: `ask:${id}:${i}`,
+    }]);
+    
+    await bot.telegram.sendMessage(chatId, `❓ ${escapeHtml(question)}`, {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: keyboard },
+    });
+    
+    return promise;
+  });
+  
+  // Handle callback queries (approvals + ask_user)
   bot.on('callback_query', async (ctx) => {
     const data = (ctx.callbackQuery as any).data;
     if (!data) return;
     
+    // Handle ask_user responses
+    if (data.startsWith('ask:')) {
+      const [, id, indexStr] = data.split(':');
+      const pending = pendingQuestions.get(id);
+      
+      if (pending) {
+        // Get the selected option text from the keyboard
+        const keyboard = (ctx.callbackQuery.message as any)?.reply_markup?.inline_keyboard;
+        const optionIndex = parseInt(indexStr);
+        const selectedText = keyboard?.[optionIndex]?.[0]?.text || `Option ${optionIndex + 1}`;
+        
+        pending.resolve(selectedText);
+        
+        try {
+          await ctx.editMessageText(`✅ Selected: <b>${escapeHtml(selectedText)}</b>`, { parse_mode: 'HTML' });
+        } catch {}
+        
+        await ctx.answerCbQuery(`Selected: ${selectedText}`);
+      } else {
+        await ctx.answerCbQuery('This question has expired');
+      }
+      return;
+    }
+    
+    // Handle approval/deny
     const [action, id] = data.split(':');
     if (!id || (action !== 'approve' && action !== 'deny')) return;
     
@@ -206,7 +279,6 @@ export function createBot(config: BotConfig) {
     const handled = handleApproval(id, approved);
     
     if (handled) {
-      // Update the message to show the decision
       const statusText = approved 
         ? '✅ <b>Command Approved</b>' 
         : '❌ <b>Command Denied</b>';

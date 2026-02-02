@@ -14,15 +14,18 @@
  * - search_web       : Search the internet (Z.AI + Tavily)
  * - fetch_page       : Fetch URL content
  * - manage_tasks     : Task management (todo list)
+ * - ask_user         : Ask user with button options
  */
 
 import * as bash from './bash.js';
 import * as files from './files.js';
 import * as web from './web.js';
 import * as tasks from './tasks.js';
+import * as ask from './ask.js';
 
-// Re-export approval callback setter
+// Re-export callback setters
 export { setApprovalCallback } from './bash.js';
+export { setAskCallback } from './ask.js';
 
 // Tool definitions for OpenAI
 export const definitions = [
@@ -37,6 +40,7 @@ export const definitions = [
   web.searchWebDefinition,
   web.fetchPageDefinition,
   tasks.manageTasksDefinition,
+  ask.definition,
 ];
 
 // Tool names
@@ -98,6 +102,9 @@ export async function execute(
     
     case 'manage_tasks':
       return tasks.executeManageTasks(args as any, ctx.sessionId || 'default');
+    
+    case 'ask_user':
+      return ask.execute(args as any, ctx.sessionId || 'default');
     
     default:
       return { success: false, error: `Unknown tool: ${name}` };
