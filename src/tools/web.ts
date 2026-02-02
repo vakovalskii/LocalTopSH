@@ -108,12 +108,48 @@ export async function executeSearchWeb(
   }
 }
 
+// Z.AI Web Reader API (parses pages to markdown)
+async function readPageZai(url: string, apiKey: string): Promise<string> {
+  const response = await fetch('https://api.z.ai/api/paas/v4/reader', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      url,
+      return_format: 'markdown',
+      retain_images: false,
+      timeout: 30,
+    }),
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Z.AI Reader error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  const result = data.reader_result;
+  
+  if (!result?.content) {
+    throw new Error('No content returned');
+  }
+  
+  // Build nice output
+  let output = '';
+  if (result.title) output += `# ${result.title}\n\n`;
+  if (result.description) output += `> ${result.description}\n\n`;
+  output += result.content;
+  
+  return output;
+}
+
 // ============ fetch_page ============
 export const fetchPageDefinition = {
   type: "function" as const,
   function: {
     name: "fetch_page",
-    description: "Fetch content from a URL.",
+    description: "Fetch and parse content from a URL. Returns clean markdown text.",
     parameters: {
       type: "object",
       properties: {
@@ -170,7 +206,8 @@ function isUrlSafe(url: string): { safe: boolean; reason?: string } {
 }
 
 export async function executeFetchPage(
-  args: { url: string }
+  args: { url: string },
+  zaiApiKey?: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   // Security: validate URL
   const urlCheck = isUrlSafe(args.url);
@@ -179,10 +216,22 @@ export async function executeFetchPage(
     return { success: false, error: `🚫 BLOCKED: ${urlCheck.reason}` };
   }
   
+  // Try Z.AI Reader first (better parsing)
+  if (zaiApiKey) {
+    try {
+      console.log('[fetch] Using Z.AI Reader...');
+      const content = await readPageZai(args.url, zaiApiKey);
+      return { success: true, output: content.slice(0, 50000) };
+    } catch (e: any) {
+      console.log(`[fetch] Z.AI Reader failed: ${e.message}, falling back to direct fetch`);
+    }
+  }
+  
+  // Fallback to direct fetch
   try {
     const response = await fetch(args.url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Agent/1.0)' },
-      redirect: 'manual',  // Don't follow redirects to internal URLs
+      redirect: 'follow',
     });
     
     // Check if redirected to blocked URL

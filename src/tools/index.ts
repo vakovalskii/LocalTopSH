@@ -127,7 +127,7 @@ export async function execute(
       break;
     
     case 'fetch_page':
-      result = await web.executeFetchPage(args as any);
+      result = await web.executeFetchPage(args as any, ctx.zaiApiKey);
       break;
     
     case 'manage_tasks':
