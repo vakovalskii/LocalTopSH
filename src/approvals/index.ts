@@ -77,6 +77,10 @@ const BLOCKED_PATTERNS: { pattern: RegExp; reason: string }[] = [
   // Fork bombs and similar
   { pattern: /\(\s*\)\s*\{\s*\|/, reason: 'BLOCKED: Potential fork bomb' },
   { pattern: /&\s*&\s*.*&\s*&/, reason: 'BLOCKED: Multiple background forks' },
+  { pattern: /for.*do.*&.*done/i, reason: 'BLOCKED: Loop spawning background processes' },
+  { pattern: /while.*do.*&.*done/i, reason: 'BLOCKED: Loop spawning background processes' },
+  { pattern: /sleep\s+[0-9]{4,}/, reason: 'BLOCKED: Very long sleep (resource hog)' },
+  { pattern: /(\s*&\s*){3,}/, reason: 'BLOCKED: Too many background processes' },
   
   // Crypto mining 
   { pattern: /\bxmrig\b/i, reason: 'BLOCKED: Crypto miner' },

@@ -96,6 +96,8 @@ NEVER CREATE OR RUN:
 - Scripts that calculate Pi/e/sqrt(2) to thousands+ digits
 - Huge factorials (>1000!)
 - Fork bombs, memory exhaustion scripts
+- Scripts spawning many background processes (for i in {1..10}; do ... &; done)
+- Long sleeps (sleep 30000) - это DoS атака
 - Stress tests, benchmarks, load tests
 - Files larger than 1MB
 - HUGE PACKAGES: tensorflow, pytorch, torch, jax, transformers, diffusers - они по несколько ГБ! Предложи API или легковесную альтернативу
