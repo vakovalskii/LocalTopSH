@@ -13,7 +13,123 @@ export interface PendingCommand {
   createdAt: number;
 }
 
-// Dangerous command patterns
+// Blocked commands - these leak secrets or are never allowed
+const BLOCKED_PATTERNS: { pattern: RegExp; reason: string }[] = [
+  // Environment/secrets leak - CRITICAL
+  { pattern: /\benv\b(?!\s*=)/, reason: 'BLOCKED: Leaks all environment variables including API keys' },
+  { pattern: /\bprintenv\b/, reason: 'BLOCKED: Leaks environment variables' },
+  { pattern: /\bset\s*$/, reason: 'BLOCKED: Leaks shell variables and environment' },
+  { pattern: /\bexport\s*$/, reason: 'BLOCKED: Lists all exported variables' },
+  { pattern: /\bexport\s+-p\b/, reason: 'BLOCKED: Lists all exported variables' },
+  { pattern: /\bdeclare\s+-x\b/, reason: 'BLOCKED: Lists exported variables' },
+  { pattern: /\bcompgen\s+-v\b/, reason: 'BLOCKED: Lists all variables' },
+  { pattern: /\/proc\/\d+\/environ/, reason: 'BLOCKED: Reads process environment' },
+  { pattern: /\/proc\/self\/environ/, reason: 'BLOCKED: Reads own environment' },
+  { pattern: /\$\{?\w*[Kk][Ee][Yy]\w*\}?/, reason: 'BLOCKED: Attempted key variable access' },
+  { pattern: /\$\{?[A-Z_]*TOKEN[A-Z_]*\}?/, reason: 'BLOCKED: Attempted token variable access' },
+  { pattern: /\$\{?[A-Z_]*SECRET[A-Z_]*\}?/, reason: 'BLOCKED: Attempted secret variable access' },
+  { pattern: /\becho\s+\$[A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|PASS|API|CREDENTIAL)[A-Z_]*/i, reason: 'BLOCKED: Attempted to print secret' },
+  
+  // Reading sensitive files
+  { pattern: /\bcat\s+.*\.env\b/, reason: 'BLOCKED: Reading .env file with secrets' },
+  { pattern: /\bless\s+.*\.env\b/, reason: 'BLOCKED: Reading .env file' },
+  { pattern: /\bmore\s+.*\.env\b/, reason: 'BLOCKED: Reading .env file' },
+  { pattern: /\bhead\s+.*\.env\b/, reason: 'BLOCKED: Reading .env file' },
+  { pattern: /\btail\s+.*\.env\b/, reason: 'BLOCKED: Reading .env file' },
+  { pattern: /\bgrep\s+.*\.env\b/, reason: 'BLOCKED: Searching in .env file' },
+  { pattern: /\bcat\s+.*credentials/, reason: 'BLOCKED: Reading credentials file' },
+  { pattern: /\bcat\s+.*secret/, reason: 'BLOCKED: Reading secrets file' },
+  { pattern: /\bcat\s+~?\/?\.ssh\//, reason: 'BLOCKED: Reading SSH keys' },
+  { pattern: /\bcat\s+.*id_rsa/, reason: 'BLOCKED: Reading SSH private key' },
+  { pattern: /\bcat\s+.*\.pem\b/, reason: 'BLOCKED: Reading certificate/key' },
+  { pattern: /\bcat\s+.*\.key\b/, reason: 'BLOCKED: Reading key file' },
+  
+  // Exfiltration attempts  
+  { pattern: /\bcurl\s+.*-d\s*["']?\$/, reason: 'BLOCKED: Sending env var via curl' },
+  { pattern: /\bwget\s+.*\$[A-Z]/, reason: 'BLOCKED: URL contains env variable' },
+  { pattern: /\bnc\s+.*<<</, reason: 'BLOCKED: Sending data via netcat' },
+  
+  // Network scanning (used in the leak!)
+  { pattern: /\bnmap\b/, reason: 'BLOCKED: Network scanning not allowed' },
+  { pattern: /\bmasscan\b/, reason: 'BLOCKED: Network scanning not allowed' },
+  { pattern: /\bzmap\b/, reason: 'BLOCKED: Network scanning not allowed' },
+  
+  // DoS prevention - resource exhaustion
+  { pattern: /\byes\s*\|/, reason: 'BLOCKED: Infinite output pipe' },
+  { pattern: /\byes\s*$/, reason: 'BLOCKED: Infinite output command' },
+  { pattern: /\/dev\/zero/, reason: 'BLOCKED: Infinite zero stream' },
+  { pattern: /\/dev\/urandom.*dd/, reason: 'BLOCKED: Large random data generation' },
+  { pattern: /head\s+-c\s*[0-9]{10,}/, reason: 'BLOCKED: Extremely large data read' },
+  { pattern: /dd\s+.*count=[0-9]{7,}/, reason: 'BLOCKED: Extremely large dd operation' },
+  { pattern: /fallocate\s+-l\s*[0-9]+[GT]/i, reason: 'BLOCKED: Creating huge file' },
+  { pattern: /truncate\s+-s\s*[0-9]+[GT]/i, reason: 'BLOCKED: Creating huge file' },
+  
+  // Python DoS patterns
+  { pattern: /python.*factorial\s*\(\s*[0-9]{6,}\s*\)/, reason: 'BLOCKED: Huge factorial computation' },
+  { pattern: /python.*-c.*while\s*(True|1)/, reason: 'BLOCKED: Infinite Python loop' },
+  { pattern: /python.*10\s*\*\*\s*[0-9]{8,}/, reason: 'BLOCKED: Huge number computation' },
+  { pattern: /python.*\*\*\s*[0-9]{7,}/, reason: 'BLOCKED: Huge exponentiation' },
+  
+  // Bash DoS patterns
+  { pattern: /seq\s+[0-9]{10,}/, reason: 'BLOCKED: Huge sequence generation' },
+  { pattern: /\{1\.\.[0-9]{8,}\}/, reason: 'BLOCKED: Huge brace expansion' },
+  
+  // Fork bombs and similar
+  { pattern: /\(\s*\)\s*\{\s*\|/, reason: 'BLOCKED: Potential fork bomb' },
+  { pattern: /&\s*&\s*.*&\s*&/, reason: 'BLOCKED: Multiple background forks' },
+  
+  // Crypto mining 
+  { pattern: /\bxmrig\b/i, reason: 'BLOCKED: Crypto miner' },
+  { pattern: /\bcpuminer\b/i, reason: 'BLOCKED: Crypto miner' },
+  { pattern: /\bminerd\b/i, reason: 'BLOCKED: Crypto miner' },
+  { pattern: /stratum\+tcp:\/\//i, reason: 'BLOCKED: Mining pool connection' },
+  
+  // History/log reading (privacy)
+  { pattern: /\bhistory\b/, reason: 'BLOCKED: Reading command history' },
+  { pattern: /\.bash_history/, reason: 'BLOCKED: Reading bash history' },
+  { pattern: /\.zsh_history/, reason: 'BLOCKED: Reading zsh history' },
+  
+  // Data exfiltration via curl/wget
+  { pattern: /\bcurl\s+.*(-d|--data|--data-raw|--data-binary)\s/, reason: 'BLOCKED: curl with POST data (potential exfiltration)' },
+  { pattern: /\bcurl\s+.*-F\s/, reason: 'BLOCKED: curl with form upload' },
+  { pattern: /\bcurl\s+.*-T\s/, reason: 'BLOCKED: curl with file upload' },
+  { pattern: /\bcurl\s+.*--upload-file/, reason: 'BLOCKED: curl with file upload' },
+  { pattern: /\bcurl\s+.*-X\s*POST/, reason: 'BLOCKED: curl POST request' },
+  { pattern: /\bcurl\s+.*-X\s*PUT/, reason: 'BLOCKED: curl PUT request' },
+  { pattern: /\bwget\s+.*--post-data/, reason: 'BLOCKED: wget with POST data' },
+  { pattern: /\bwget\s+.*--post-file/, reason: 'BLOCKED: wget with file upload' },
+  
+  // DNS exfiltration
+  { pattern: /\bnslookup\s+.*\$/, reason: 'BLOCKED: DNS query with variable (exfiltration)' },
+  { pattern: /\bdig\s+.*\$/, reason: 'BLOCKED: DNS query with variable (exfiltration)' },
+  { pattern: /\bhost\s+.*\$/, reason: 'BLOCKED: DNS query with variable (exfiltration)' },
+  { pattern: /\$\(.*\)\..*\.(com|net|org|io)/, reason: 'BLOCKED: Command substitution in domain (DNS exfiltration)' },
+  
+  // Symlink attacks (escape workspace)
+  { pattern: /\bln\s+-s\s+\//, reason: 'BLOCKED: Symlink to absolute path (potential escape)' },
+  { pattern: /\bln\s+.*-s.*\/etc/, reason: 'BLOCKED: Symlink to /etc' },
+  { pattern: /\bln\s+.*-s.*\/root/, reason: 'BLOCKED: Symlink to /root' },
+  { pattern: /\bln\s+.*-s.*\/home/, reason: 'BLOCKED: Symlink to /home' },
+  { pattern: /\bln\s+.*-s.*\/proc/, reason: 'BLOCKED: Symlink to /proc' },
+  
+  // Cloud metadata access
+  { pattern: /169\.254\.169\.254/, reason: 'BLOCKED: Cloud metadata endpoint' },
+  { pattern: /metadata\.google\.internal/, reason: 'BLOCKED: GCP metadata endpoint' },
+  
+  // Docker socket access (container escape)
+  { pattern: /\/var\/run\/docker\.sock/, reason: 'BLOCKED: Docker socket access' },
+  { pattern: /docker\s+run\s+.*--privileged/, reason: 'BLOCKED: Privileged container' },
+  { pattern: /docker\s+run\s+.*-v\s+\//, reason: 'BLOCKED: Mount host root in container' },
+  
+  // Webhook/callback exfiltration
+  { pattern: /\bcurl\s+.*ngrok\.io/, reason: 'BLOCKED: Request to ngrok (exfiltration tunnel)' },
+  { pattern: /\bcurl\s+.*webhook\.site/, reason: 'BLOCKED: Request to webhook.site' },
+  { pattern: /\bcurl\s+.*requestbin/, reason: 'BLOCKED: Request to requestbin' },
+  { pattern: /\bcurl\s+.*pipedream/, reason: 'BLOCKED: Request to pipedream' },
+  { pattern: /\bcurl\s+.*burpcollaborator/, reason: 'BLOCKED: Request to burp collaborator' },
+];
+
+// Dangerous command patterns - require approval
 const DANGEROUS_PATTERNS: { pattern: RegExp; reason: string }[] = [
   // Destructive file operations
   { pattern: /\brm\s+(-[rf]+\s+)*[\/~]/, reason: 'Recursive delete from root/home' },
@@ -112,15 +228,27 @@ const pendingCommands = new Map<string, PendingCommand>();
 const COMMAND_TIMEOUT = 5 * 60 * 1000;
 
 /**
- * Check if command is dangerous
+ * Check if command is blocked (never allowed) or dangerous (requires approval)
  */
-export function checkCommand(command: string): { dangerous: boolean; reason?: string } {
-  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
+export function checkCommand(command: string): { 
+  dangerous: boolean; 
+  blocked: boolean;
+  reason?: string 
+} {
+  // First check blocked patterns - these are NEVER allowed
+  for (const { pattern, reason } of BLOCKED_PATTERNS) {
     if (pattern.test(command)) {
-      return { dangerous: true, reason };
+      return { dangerous: true, blocked: true, reason };
     }
   }
-  return { dangerous: false };
+  
+  // Then check dangerous patterns - these require approval
+  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) {
+      return { dangerous: true, blocked: false, reason };
+    }
+  }
+  return { dangerous: false, blocked: false };
 }
 
 /**

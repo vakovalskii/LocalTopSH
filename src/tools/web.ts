@@ -124,13 +124,77 @@ export const fetchPageDefinition = {
   },
 };
 
+// Blocked URL patterns for security
+const BLOCKED_URL_PATTERNS = [
+  // Cloud metadata endpoints (AWS, GCP, Azure, etc.)
+  /^https?:\/\/169\.254\.169\.254/i,  // AWS/GCP metadata
+  /^https?:\/\/metadata\.google\.internal/i,  // GCP metadata
+  /^https?:\/\/metadata\.azure\.internal/i,  // Azure metadata
+  /^https?:\/\/100\.100\.100\.200/i,  // Alibaba metadata
+  
+  // Internal/private networks
+  /^https?:\/\/localhost/i,
+  /^https?:\/\/127\./i,
+  /^https?:\/\/10\./i,
+  /^https?:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\./i,
+  /^https?:\/\/192\.168\./i,
+  /^https?:\/\/0\.0\.0\.0/i,
+  /^https?:\/\/\[::1\]/i,  // IPv6 localhost
+  
+  // File protocol
+  /^file:/i,
+  
+  // Internal Docker networks
+  /^https?:\/\/host\.docker\.internal/i,
+  /^https?:\/\/docker\.internal/i,
+  
+  // Kubernetes internal
+  /^https?:\/\/kubernetes\.default/i,
+  /^https?:\/\/.*\.cluster\.local/i,
+];
+
+// Check if URL is safe to fetch
+function isUrlSafe(url: string): { safe: boolean; reason?: string } {
+  // Must be http or https
+  if (!url.match(/^https?:\/\//i)) {
+    return { safe: false, reason: 'Only http/https URLs allowed' };
+  }
+  
+  for (const pattern of BLOCKED_URL_PATTERNS) {
+    if (pattern.test(url)) {
+      return { safe: false, reason: 'URL blocked for security (internal/metadata endpoint)' };
+    }
+  }
+  
+  return { safe: true };
+}
+
 export async function executeFetchPage(
   args: { url: string }
 ): Promise<{ success: boolean; output?: string; error?: string }> {
+  // Security: validate URL
+  const urlCheck = isUrlSafe(args.url);
+  if (!urlCheck.safe) {
+    console.log(`[SECURITY] Blocked fetch: ${args.url} - ${urlCheck.reason}`);
+    return { success: false, error: `🚫 BLOCKED: ${urlCheck.reason}` };
+  }
+  
   try {
     const response = await fetch(args.url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Agent/1.0)' },
+      redirect: 'manual',  // Don't follow redirects to internal URLs
     });
+    
+    // Check if redirected to blocked URL
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (location) {
+        const redirectCheck = isUrlSafe(location);
+        if (!redirectCheck.safe) {
+          return { success: false, error: `🚫 BLOCKED: Redirect to internal URL blocked` };
+        }
+      }
+    }
     
     if (!response.ok) {
       return { success: false, error: `HTTP ${response.status}` };

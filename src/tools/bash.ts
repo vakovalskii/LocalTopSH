@@ -8,6 +8,54 @@
 import { execSync, spawn } from 'child_process';
 import { checkCommand, storePendingCommand } from '../approvals/index.js';
 
+// Patterns to sanitize from output
+const SECRET_PATTERNS = [
+  // API Keys and Tokens
+  /([A-Za-z0-9_]*(?:API[_-]?KEY|APIKEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL|AUTH)[A-Za-z0-9_]*)=([^\s\n]+)/gi,
+  // Common key formats
+  /sk-[A-Za-z0-9]{20,}/g,  // OpenAI-style keys
+  /tvly-[A-Za-z0-9-]{20,}/g,  // Tavily keys
+  /[a-f0-9]{32}\.[A-Za-z0-9]{20,}/g,  // ZAI-style keys
+  /ghp_[A-Za-z0-9]{36,}/g,  // GitHub tokens
+  /gho_[A-Za-z0-9]{36,}/g,  // GitHub OAuth
+  /github_pat_[A-Za-z0-9_]{36,}/g,  // GitHub PAT
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g,  // Slack tokens
+  /\b[0-9]{8,12}:[A-Za-z0-9_-]{35}\b/g,  // Telegram bot tokens
+  /Bearer\s+[A-Za-z0-9._-]{20,}/gi,  // Bearer tokens
+  /Basic\s+[A-Za-z0-9+/=]{20,}/gi,  // Basic auth
+  // AWS
+  /AKIA[0-9A-Z]{16}/g,  // AWS Access Key ID
+  /[A-Za-z0-9/+=]{40}(?=\s|$|")/g,  // AWS Secret (heuristic)
+  // Private keys
+  /-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----/g,
+  // Generic secrets with common env var names
+  /(?:TELEGRAM_TOKEN|API_KEY|APIKEY|ZAI_API_KEY|TAVILY_API_KEY)=\S+/gi,
+];
+
+/**
+ * Remove secrets from output
+ */
+function sanitizeOutput(output: string): string {
+  let sanitized = output;
+  
+  for (const pattern of SECRET_PATTERNS) {
+    sanitized = sanitized.replace(pattern, (match) => {
+      // For key=value patterns, keep the key name
+      if (match.includes('=')) {
+        const key = match.split('=')[0];
+        return `${key}=[REDACTED]`;
+      }
+      // For raw secrets, show partial
+      if (match.length > 10) {
+        return match.slice(0, 4) + '***[REDACTED]***';
+      }
+      return '[REDACTED]';
+    });
+  }
+  
+  return sanitized;
+}
+
 // Callback for showing approval buttons (non-blocking)
 let showApprovalCallback: ((
   chatId: number,
@@ -59,9 +107,20 @@ export async function execute(
   const sessionId = context.sessionId || 'default';
   const chatId = context.chatId || 0;
   
-  // Check if command is dangerous
-  const { dangerous, reason } = checkCommand(args.command);
+  // Check if command is dangerous or blocked
+  const { dangerous, blocked, reason } = checkCommand(args.command);
   
+  // BLOCKED commands - never allowed, even with approval
+  if (blocked) {
+    console.log(`[SECURITY] BLOCKED command: ${args.command}`);
+    console.log(`[SECURITY] Reason: ${reason}`);
+    return {
+      success: false,
+      error: `🚫 ${reason}\n\nThis command is not allowed for security reasons.`,
+    };
+  }
+  
+  // DANGEROUS commands - require approval
   if (dangerous) {
     console.log(`[SECURITY] Dangerous command detected: ${args.command}`);
     console.log(`[SECURITY] Reason: ${reason}`);
@@ -129,11 +188,14 @@ export function executeCommand(
       maxBuffer: 1024 * 1024 * 10,
     });
     
+    // Sanitize secrets from output
+    const sanitized = sanitizeOutput(output);
+    
     // Limit output to prevent context overflow and rate limits
     const maxOutput = 4000;
-    const trimmed = output.length > maxOutput 
-      ? output.slice(0, 2000) + '\n\n...(truncated ' + (output.length - maxOutput) + ' chars)...\n\n' + output.slice(-1500)
-      : output;
+    const trimmed = sanitized.length > maxOutput 
+      ? sanitized.slice(0, 2000) + '\n\n...(truncated ' + (sanitized.length - maxOutput) + ' chars)...\n\n' + sanitized.slice(-1500)
+      : sanitized;
     
     return { success: true, output: trimmed || "(empty output)" };
   } catch (e: any) {
@@ -141,10 +203,13 @@ export function executeCommand(
     const stdout = e.stdout?.toString() || '';
     const full = stderr || stdout || e.message;
     
-    // Truncate error output too
-    const trimmed = full.length > 5000 
-      ? full.slice(0, 2500) + '\n...(truncated)...\n' + full.slice(-2000)
-      : full;
+    // Sanitize secrets from error output too
+    const sanitized = sanitizeOutput(full);
+    
+    // Truncate error output
+    const trimmed = sanitized.length > 5000 
+      ? sanitized.slice(0, 2500) + '\n...(truncated)...\n' + sanitized.slice(-2000)
+      : sanitized;
     
     return { 
       success: false, 

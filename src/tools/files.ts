@@ -3,10 +3,113 @@
  * read_file, write_file, edit_file, delete_file, search_files, search_text, list_directory
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, lstatSync, realpathSync } from 'fs';
+import { join, dirname, resolve, basename } from 'path';
 import fg from 'fast-glob';
 import { execSync } from 'child_process';
+
+// Files that should NEVER be read - contain secrets
+const SENSITIVE_FILES = [
+  '.env',
+  '.env.local',
+  '.env.production',
+  '.env.development',
+  '.env.staging',
+  'credentials.json',
+  'credentials.yaml',
+  'secrets.json',
+  'secrets.yaml',
+  '.secrets',
+  'service-account.json',
+  'serviceAccountKey.json',
+  '.npmrc', // may contain tokens
+  '.pypirc', // may contain tokens
+  'id_rsa',
+  'id_ed25519',
+  'id_ecdsa',
+  'id_dsa',
+  '.pem',
+  '.key',
+];
+
+const SENSITIVE_PATTERNS = [
+  /\.env(\.[a-z]+)?$/i,
+  /credentials?\.(json|yaml|yml)$/i,
+  /secrets?\.(json|yaml|yml)$/i,
+  /service.?account.*\.json$/i,
+  /private.?key/i,
+  /id_(rsa|dsa|ecdsa|ed25519)$/i,
+  /\.(pem|key|p12|pfx)$/i,
+];
+
+/**
+ * Check if file is sensitive and should not be read
+ */
+function isSensitiveFile(filePath: string): boolean {
+  const fileName = basename(filePath).toLowerCase();
+  const fullPath = filePath.toLowerCase();
+  
+  // Check exact matches
+  if (SENSITIVE_FILES.some(f => fileName === f.toLowerCase())) {
+    return true;
+  }
+  
+  // Check patterns
+  if (SENSITIVE_PATTERNS.some(p => p.test(fullPath))) {
+    return true;
+  }
+  
+  // Block reading from .ssh directory
+  if (fullPath.includes('/.ssh/') || fullPath.includes('\\.ssh\\')) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Check if path is a symlink pointing outside workspace (symlink escape attack)
+ */
+function isSymlinkEscape(filePath: string, workspacePath: string): { escape: boolean; reason?: string } {
+  try {
+    // Check if file/path exists
+    if (!existsSync(filePath)) {
+      return { escape: false };  // File doesn't exist yet, will be created
+    }
+    
+    // Get real path (resolves all symlinks)
+    const realPath = realpathSync(filePath);
+    const realWorkspace = realpathSync(workspacePath);
+    
+    // Check if real path is within workspace
+    if (!realPath.startsWith(realWorkspace + '/') && realPath !== realWorkspace) {
+      console.log(`[SECURITY] Symlink escape detected: ${filePath} -> ${realPath}`);
+      return { 
+        escape: true, 
+        reason: `Symlink points outside workspace (${realPath})` 
+      };
+    }
+    
+    // Check if it's a symlink to sensitive location
+    const stats = lstatSync(filePath);
+    if (stats.isSymbolicLink()) {
+      const sensitivePaths = ['/etc', '/root', '/home', '/proc', '/sys', '/dev', '/var'];
+      for (const sensitive of sensitivePaths) {
+        if (realPath.startsWith(sensitive)) {
+          return { 
+            escape: true, 
+            reason: `Symlink points to sensitive location (${sensitive})` 
+          };
+        }
+      }
+    }
+    
+    return { escape: false };
+  } catch (e) {
+    // If we can't resolve, it might be a broken symlink - allow operation
+    return { escape: false };
+  }
+}
 
 // ============ read_file ============
 export const readDefinition = {
@@ -31,6 +134,25 @@ export async function executeRead(
   cwd: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const fullPath = args.path.startsWith('/') ? args.path : join(cwd, args.path);
+  
+  // Security: Block reading sensitive files
+  if (isSensitiveFile(fullPath)) {
+    console.log(`[SECURITY] Blocked read of sensitive file: ${fullPath}`);
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: Cannot read sensitive file (${basename(fullPath)}). This file may contain secrets.` 
+    };
+  }
+  
+  // Security: Check for symlink escape
+  const symlinkCheck = isSymlinkEscape(fullPath, cwd);
+  if (symlinkCheck.escape) {
+    console.log(`[SECURITY] Symlink escape blocked: ${fullPath}`);
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: ${symlinkCheck.reason}` 
+    };
+  }
   
   if (!existsSync(fullPath)) {
     return { success: false, error: `File not found: ${fullPath}` };
@@ -78,6 +200,34 @@ export async function executeWrite(
   cwd: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const fullPath = args.path.startsWith('/') ? args.path : join(cwd, args.path);
+  const resolvedPath = resolve(fullPath);
+  const resolvedCwd = resolve(cwd);
+  
+  // Security: Prevent writing outside workspace
+  if (!resolvedPath.startsWith(resolvedCwd + '/') && resolvedPath !== resolvedCwd) {
+    console.log(`[SECURITY] Blocked write outside workspace: ${fullPath}`);
+    return { 
+      success: false, 
+      error: '🚫 BLOCKED: Cannot write files outside workspace' 
+    };
+  }
+  
+  // Security: Block writing to sensitive files
+  if (isSensitiveFile(fullPath)) {
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: Cannot write to sensitive file (${basename(fullPath)})` 
+    };
+  }
+  
+  // Security: Check for symlink escape (if file already exists)
+  const symlinkCheck = isSymlinkEscape(fullPath, cwd);
+  if (symlinkCheck.escape) {
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: ${symlinkCheck.reason}` 
+    };
+  }
   
   try {
     const dir = dirname(fullPath);
@@ -114,6 +264,23 @@ export async function executeEdit(
   cwd: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const fullPath = args.path.startsWith('/') ? args.path : join(cwd, args.path);
+  
+  // Security: Block editing sensitive files
+  if (isSensitiveFile(fullPath)) {
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: Cannot edit sensitive file (${basename(fullPath)})` 
+    };
+  }
+  
+  // Security: Check for symlink escape
+  const symlinkCheck = isSymlinkEscape(fullPath, cwd);
+  if (symlinkCheck.escape) {
+    return { 
+      success: false, 
+      error: `🚫 BLOCKED: ${symlinkCheck.reason}` 
+    };
+  }
   
   if (!existsSync(fullPath)) {
     return { success: false, error: `File not found: ${fullPath}` };
@@ -241,6 +408,15 @@ export async function executeSearchText(
   },
   cwd: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
+  // Block searching for secrets
+  const secretPatterns = /password|secret|token|api.?key|credential|private.?key/i;
+  if (secretPatterns.test(args.pattern)) {
+    return { 
+      success: false, 
+      error: '🚫 BLOCKED: Cannot search for secrets/credentials patterns' 
+    };
+  }
+  
   const searchPath = args.path 
     ? (args.path.startsWith('/') ? args.path : join(cwd, args.path))
     : cwd;
@@ -253,8 +429,10 @@ export async function executeSearchText(
     if (args.context_before) flags.push(`-B${args.context_before}`);
     if (args.context_after) flags.push(`-A${args.context_after}`);
     
-    // Exclude common junk
+    // Exclude common junk AND sensitive files
     flags.push('--exclude-dir=node_modules', '--exclude-dir=.git', '--exclude-dir=dist');
+    flags.push('--exclude=*.env*', '--exclude=*credentials*', '--exclude=*secret*');
+    flags.push('--exclude=*.pem', '--exclude=*.key', '--exclude=id_rsa*');
     
     const escapedPattern = args.pattern.replace(/"/g, '\\"');
     const cmd = `grep ${flags.join(' ')} "${escapedPattern}" "${searchPath}" 2>/dev/null | head -200`;
@@ -281,6 +459,19 @@ export const listDirectoryDefinition = {
   },
 };
 
+// Directories that should not be listed
+const BLOCKED_DIRECTORIES = [
+  '/etc',
+  '/root',
+  '/.ssh',
+  '/proc',
+  '/sys',
+  '/dev',
+  '/boot',
+  '/var/log',
+  '/var/run',
+];
+
 export async function executeListDirectory(
   args: { path?: string },
   cwd: string
@@ -288,6 +479,25 @@ export async function executeListDirectory(
   const dir = args.path 
     ? (args.path.startsWith('/') ? args.path : join(cwd, args.path))
     : cwd;
+  
+  // Security: Block listing sensitive directories
+  const resolvedDir = resolve(dir).toLowerCase();
+  for (const blocked of BLOCKED_DIRECTORIES) {
+    if (resolvedDir === blocked || resolvedDir.startsWith(blocked + '/')) {
+      return { 
+        success: false, 
+        error: `🚫 BLOCKED: Cannot list directory ${blocked} for security reasons` 
+      };
+    }
+  }
+  
+  // Also block home .ssh
+  if (resolvedDir.includes('/.ssh')) {
+    return { 
+      success: false, 
+      error: '🚫 BLOCKED: Cannot list .ssh directory' 
+    };
+  }
   
   try {
     const output = execSync(`ls -la "${dir}"`, { encoding: 'utf-8', cwd });

@@ -13,6 +13,52 @@ services:
       - "4000-4099:4000-4099"
     networks:
       - agent-net
+    
+    # ============ SECURITY HARDENING ============
+    
+    # Drop all capabilities except what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN        # For pip/npm to work
+      - SETUID       # For subprocess creation
+      - SETGID       # For subprocess creation
+      - NET_BIND_SERVICE  # For binding ports < 1024 (optional)
+    
+    # Prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    
+    # Resource limits to prevent DoS
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+          pids: 100  # Limit processes to prevent fork bombs
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Temp filesystem for /tmp (not persistent, limited size)
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+    
+    # Read-only /app (code), writable /workspace only
+    # Note: Can't use read_only:true because npm/pip need to write caches
+    
+    # Prevent container from accessing host network
+    # (agent-net is isolated)
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 networks:
   agent-net:
+    driver: bridge
+    internal: false  # Set to true to block all external network access
