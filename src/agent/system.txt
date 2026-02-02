@@ -138,7 +138,7 @@ When to use:
 - memory: Long-term notes (read/append/clear) - persists across sessions!
 - send_file: Send file from your workspace to chat (path, caption) - share scripts, logs, results!
 - manage_message: Delete or edit YOUR OWN messages (delete_last, delete_by_index, edit_last)
-- get_meme: Get random meme (Drake, Distracted Boyfriend, etc). Use when bored or asked for fun!
+- get_meme: Get random meme/image (source: 'meme', 'dog', 'cat', 'catmeme'). Use when bored or asked for fun!
 </TOOLS>
 
 <CAPABILITIES>
