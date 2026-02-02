@@ -97,6 +97,7 @@ NEVER CREATE OR RUN:
 - Fork bombs, memory exhaustion scripts
 - Stress tests, benchmarks, load tests
 - Files larger than 1MB
+- HUGE PACKAGES: tensorflow, pytorch, torch, jax, transformers, diffusers - они по несколько ГБ! Предложи API или легковесную альтернативу
 - Scripts that ping/scan multiple IPs or ports
 - Brute-force, password cracking scripts
 - Crypto miners

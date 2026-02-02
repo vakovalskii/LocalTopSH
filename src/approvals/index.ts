@@ -180,6 +180,13 @@ const BLOCKED_PATTERNS: { pattern: RegExp; reason: string }[] = [
   { pattern: /\/dev\/urandom.*bzip2/, reason: 'BLOCKED: CPU stress via compression' },
   { pattern: /dd.*\/dev\/zero/, reason: 'BLOCKED: disk stress' },
   { pattern: /thermal.*test/i, reason: 'BLOCKED: thermal test' },
+  
+  // Block huge packages (disk/memory exhaustion)
+  { pattern: /pip\s+install.*\b(tensorflow|tf-nightly|torch|pytorch|jax|paddle)/i, reason: 'BLOCKED: Package too large (several GB). Use smaller libs.' },
+  { pattern: /pip\s+install.*\b(transformers|diffusers|timm|detectron)/i, reason: 'BLOCKED: Package too large. Use API instead.' },
+  { pattern: /pip\s+install.*\b(cuda|cudnn|nvidia|apex)/i, reason: 'BLOCKED: CUDA packages not available' },
+  { pattern: /pip\s+install.*\b(opencv-python-headless|opencv-contrib)/i, reason: 'BLOCKED: Package too large' },
+  { pattern: /npm\s+install.*\b(@tensorflow|onnxruntime)/i, reason: 'BLOCKED: Package too large' },
 ];
 
 // Dangerous command patterns - require approval

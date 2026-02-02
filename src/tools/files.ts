@@ -114,8 +114,8 @@ function isSensitiveFile(filePath: string): boolean {
  * Check if path tries to access another user's workspace or list all workspaces
  */
 function isOtherUserWorkspace(filePath: string, userWorkspace: string): boolean {
-  const resolvedPath = resolve(filePath).toLowerCase();
-  const resolvedUserWs = resolve(userWorkspace).toLowerCase();
+  const resolvedPath = resolve(filePath);
+  const resolvedUserWs = resolve(userWorkspace);
   
   // Block listing /workspace directly (would show all user folders)
   if (resolvedPath === '/workspace' || resolvedPath === '/workspace/') {
@@ -129,19 +129,24 @@ function isOtherUserWorkspace(filePath: string, userWorkspace: string): boolean 
     return true;
   }
   
-  // If path is in /workspace but NOT in user's workspace - block it
-  if (resolvedPath.includes('/workspace/') && !resolvedPath.startsWith(resolvedUserWs)) {
-    // Check if trying to access /workspace/OTHER_USER_ID/
-    const workspaceMatch = resolvedPath.match(/\/workspace\/(\d+)/);
-    if (workspaceMatch) {
-      const pathUserId = workspaceMatch[1];
-      const userWsMatch = resolvedUserWs.match(/\/workspace\/(\d+)/);
-      if (userWsMatch && pathUserId !== userWsMatch[1]) {
-        console.log(`[SECURITY] Blocked access to other user's workspace: ${filePath}`);
-        return true;
-      }
-    }
+  // Extract user ID from user's workspace
+  const userWsMatch = resolvedUserWs.match(/\/workspace\/(\d+)/);
+  if (!userWsMatch) {
+    return false; // Not in standard workspace structure
   }
+  const userId = userWsMatch[1];
+  
+  // If path starts with /workspace/ but is NOT user's workspace - block
+  if (resolvedPath.startsWith('/workspace/')) {
+    // Allow user's own workspace
+    if (resolvedPath.startsWith(resolvedUserWs)) {
+      return false;
+    }
+    // Block everything else in /workspace
+    console.log(`[SECURITY] Blocked access outside own workspace: ${filePath}`);
+    return true;
+  }
+  
   return false;
 }
 
