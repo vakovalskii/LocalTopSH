@@ -95,6 +95,7 @@ export interface ExecuteContext {
   cwd: string;
   sessionId?: string;
   chatId?: number;
+  chatType?: 'private' | 'group' | 'supergroup' | 'channel';
 }
 
 /**
@@ -141,6 +142,7 @@ export async function execute(
   const workDir = context.cwd;
   const sessionId = context.sessionId || 'default';
   const chatId = context.chatId || 0;
+  const chatType = context.chatType;
   
   // Check workspace isolation first
   const workspaceCheck = checkWorkspaceIsolation(args.command, workDir);
@@ -153,7 +155,8 @@ export async function execute(
   }
   
   // Check if command is dangerous or blocked
-  const { dangerous, blocked, reason } = checkCommand(args.command);
+  // In groups: dangerous = blocked (no approval possible)
+  const { dangerous, blocked, reason } = checkCommand(args.command, chatType);
   
   // BLOCKED commands - never allowed, even with approval
   if (blocked) {

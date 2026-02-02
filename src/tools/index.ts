@@ -62,6 +62,7 @@ export interface ToolContext {
   cwd: string;
   sessionId?: string;
   chatId?: number;
+  chatType?: 'private' | 'group' | 'supergroup' | 'channel';
   zaiApiKey?: string;
   tavilyApiKey?: string;
 }
@@ -76,7 +77,7 @@ export async function execute(
   
   switch (name) {
     case 'run_command':
-      return bash.execute(args as any, { cwd: ctx.cwd, sessionId: ctx.sessionId, chatId: ctx.chatId });
+      return bash.execute(args as any, { cwd: ctx.cwd, sessionId: ctx.sessionId, chatId: ctx.chatId, chatType: ctx.chatType });
     
     case 'read_file':
       return files.executeRead(args as any, ctx.cwd);

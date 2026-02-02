@@ -876,6 +876,7 @@ export function createBot(config: BotConfig) {
       
       try {
         // Run agent with tool status updates
+        // Pass chatType to restrict dangerous commands in groups
         const response = await agent.run(sessionId, text, async (toolName) => {
           console.log(`[tool] ${toolName}`);
           logGlobal(userId, 'tool', toolName);
@@ -899,7 +900,7 @@ export function createBot(config: BotConfig) {
               }
             } catch {}
           }
-        }, chatId);
+        }, chatId, chatType as any);
         
         clearInterval(typing);
         

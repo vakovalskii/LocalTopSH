@@ -279,12 +279,19 @@ const COMMAND_TIMEOUT = 5 * 60 * 1000;
 
 /**
  * Check if command is blocked (never allowed) or dangerous (requires approval)
+ * In group chats, dangerous commands are BLOCKED (no approval possible)
  */
-export function checkCommand(command: string): { 
+export function checkCommand(
+  command: string, 
+  chatType?: 'private' | 'group' | 'supergroup' | 'channel'
+): { 
   dangerous: boolean; 
   blocked: boolean;
   reason?: string 
 } {
+  const isPrivate = chatType === 'private' || !chatType;
+  const isGroup = chatType === 'group' || chatType === 'supergroup';
+  
   // First check blocked patterns - these are NEVER allowed
   for (const { pattern, reason } of BLOCKED_PATTERNS) {
     if (pattern.test(command)) {
@@ -292,9 +299,18 @@ export function checkCommand(command: string): {
     }
   }
   
-  // Then check dangerous patterns - these require approval
+  // Then check dangerous patterns - these require approval in DM, blocked in groups
   for (const { pattern, reason } of DANGEROUS_PATTERNS) {
     if (pattern.test(command)) {
+      if (isGroup) {
+        // In groups: BLOCK dangerous commands (no approval flow)
+        return { 
+          dangerous: true, 
+          blocked: true, 
+          reason: `${reason} (напиши в личку для таких команд)` 
+        };
+      }
+      // In private: allow with approval
       return { dangerous: true, blocked: false, reason };
     }
   }

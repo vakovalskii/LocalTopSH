@@ -144,7 +144,8 @@ ${chatHistory}
     sessionId: string,
     userMessage: string,
     onToolCall?: (name: string) => void,
-    chatId?: number
+    chatId?: number,
+    chatType?: 'private' | 'group' | 'supergroup' | 'channel'
   ): Promise<string> {
     const session = this.getSession(sessionId);
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -249,6 +250,7 @@ ${chatHistory}
             cwd: this.config.cwd,
             sessionId,
             chatId,
+            chatType,
             zaiApiKey: this.config.zaiApiKey,
             tavilyApiKey: this.config.tavilyApiKey,
           });
