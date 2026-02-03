@@ -2,7 +2,11 @@
 
 **Production-ready ReAct agent for Telegram group chats.**
 
-Running in [Чат Kovalskii Варианты?](https://t.me/neuraldeepchat) — **1450+ members**.
+> 🔥 **Battle-tested in production!**
+> 
+> Running 24/7 in [**@neuraldeepchat**](https://t.me/neuraldeepchat) — **1450+ members**, **1500+ messages** processed.
+> 
+> Join to try it live!
 
 ## Features
 
