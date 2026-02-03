@@ -13,26 +13,26 @@ Telegram бот с ReAct агентом, который дает пользов�
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │   1. MONITOR                                                │
-│      ├─ Читать логи контейнера (docker logs gateway -f)    │
-│      ├─ Смотреть CHAT_HISTORY.md в workspace/_shared/      │
-│      └─ Анализировать паттерны атак                        │
+│      ├─ Читать логи контейнера (docker logs gateway -f)     │
+│      ├─ Смотреть CHAT_HISTORY.md в workspace/_shared/       │
+│      └─ Анализировать паттерны атак                         │
 │                                                             │
 │   2. DETECT                                                 │
-│      ├─ Новый вектор атаки?                                │
-│      ├─ Попытка утечки env/secrets?                        │
-│      ├─ DoS/resource exhaustion?                           │
+│      ├─ Новый вектор атаки?                                 │
+│      ├─ Попытка утечки env/secrets?                         │
+│      ├─ DoS/resource exhaustion?                            │
 │      └─ Prompt injection?                                   │
 │                                                             │
 │   3. PATCH                                                  │
-│      ├─ Добавить regex в BLOCKED_PATTERNS                  │
-│      ├─ Обновить system.txt prompt                         │
-│      ├─ Добавить sanitization в bash.ts                    │
-│      └─ Обновить security.ts (prompt injection)            │
+│      ├─ Добавить regex в BLOCKED_PATTERNS                   │
+│      ├─ Обновить system.txt prompt                          │
+│      ├─ Добавить sanitization в bash.ts                     │
+│      └─ Обновить security.ts (prompt injection)             │
 │                                                             │
 │   4. DEPLOY                                                 │
-│      ├─ docker compose build --no-cache                    │
-│      ├─ docker compose up -d                               │
-│      └─ Мониторить логи после деплоя                       │
+│      ├─ docker compose build --no-cache                     │
+│      ├─ docker compose up -d                                │
+│      └─ Мониторить логи после деплоя                        │
 │                                                             │
 │   5. REPEAT                                                 │
 │                                                             │
