@@ -1,16 +1,38 @@
-# LocalTopSH
+# LocalTopSH 🐧
 
-Minimal ReAct agent with Telegram interface. ~1200 lines of code.
+**Production-ready ReAct agent for Telegram group chats.**
+
+Running in [Чат Kovalskii Варианты?](https://t.me/neuraldeepchat) — **1450+ members**.
+
+## Features
+
+- ReAct agent with 13 tools (shell, files, web search, memes, scheduler)
+- Per-user isolated workspaces in Docker
+- Secrets isolation via Docker Secrets + internal Proxy
+- Smart reactions on messages (LLM-powered)
+- Autonomous "thoughts" in chat
+- Anti-abuse: rate limits, DoS prevention, command blocking
+- 42 security tests passing
 
 ## Architecture
 
 ```
-User (Telegram) → Bot → ReAct Agent → Tools → LLM
-                         ↓
-                   Think → Act → Observe → Repeat
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Telegram  │────▶│   Gateway   │────▶│    Proxy    │
+│   1450+     │     │  (bot+agent)│     │  (secrets)  │
+│   users     │◀────│             │◀────│             │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │
+                    ┌──────┴──────┐
+                    │  /workspace │
+                    │  per-user   │
+                    │  isolation  │
+                    └─────────────┘
 ```
 
-## Tools (9)
+**Secrets never exposed to agent!** Agent only sees `PROXY_URL`.
+
+## Tools (13)
 
 | Tool | Description |
 |------|-------------|
@@ -18,65 +40,54 @@ User (Telegram) → Bot → ReAct Agent → Tools → LLM
 | `read_file` | Read file content |
 | `write_file` | Create/overwrite file |
 | `edit_file` | Edit file (find & replace) |
-| `search_files` | Find files by glob pattern |
-| `search_text` | Search text in files (grep) |
+| `delete_file` | Delete file |
+| `search_files` | Find files by glob |
+| `search_text` | Search text in files |
 | `list_directory` | List directory contents |
-| `search_web` | Web search (Z.AI + Tavily) |
+| `search_web` | Web search (Z.AI) |
 | `fetch_page` | Fetch URL content |
+| `send_file` | Send file to chat |
+| `get_meme` | Random meme/dog/cat |
+| `schedule_task` | Delayed messages/commands |
 
 ## Quick Start
 
 ```bash
-cp .env.example .env
-# Edit .env with your tokens
+# 1. Create secrets
+mkdir secrets
+echo "your-telegram-token" > secrets/telegram_token.txt
+echo "http://your-llm:8000/v1" > secrets/base_url.txt
+echo "your-llm-key" > secrets/api_key.txt
+echo "your-zai-key" > secrets/zai_api_key.txt
+chmod 644 secrets/*.txt
 
+# 2. Start
 docker compose up -d
 ```
 
-## Configuration
+## Security
 
-```env
-# LLM API (OpenAI-compatible)
-BASE_URL=http://localhost:8000/v1
-MODEL_NAME=openai/gpt-oss-20b
-API_KEY=your-key
-
-# Telegram
-TELEGRAM_TOKEN=your-bot-token
-ALLOWED_USERS=123456789
-
-# Web Search (optional)
-ZAI_API_KEY=your-zai-key
-TAVILY_API_KEY=your-tavily-key
-```
+- Docker Secrets for all API keys
+- Internal proxy isolates secrets from agent
+- Blocked: env access, /run/secrets, base64 exfil, proc filesystem
+- Blocked: stress tests, huge packages, fork bombs
+- Per-user workspace isolation
+- Rate limiting (Telegram API)
+- 42 automated security tests
 
 ## Structure
 
 ```
-src/
-├── index.ts           # Entry point
-├── agent/
-│   ├── react.ts       # ReAct loop
-│   └── system.txt     # System prompt
-├── bot/
-│   └── index.ts       # Telegram bot
-├── gateway/
-│   └── server.ts      # HTTP API (optional)
-└── tools/
-    ├── index.ts       # Tool registry
-    ├── bash.ts        # run_command
-    ├── files.ts       # File operations
-    └── web.ts         # Web search
+├── docker-compose.yml    # Gateway + Proxy containers
+├── secrets/              # API keys (gitignored)
+├── proxy/                # Internal API proxy
+│   └── index.js
+└── src/
+    ├── agent/            # ReAct loop
+    ├── bot/              # Telegram bot
+    ├── approvals/        # Command security
+    └── tools/            # 13 tools
 ```
-
-## Features
-
-- ReAct loop with history summarization
-- Telegram bot with HTML formatting
-- Group support (mention/reply)
-- User whitelist
-- Full request/response logging
-- Z.AI + Tavily web search
 
 ## License
 
