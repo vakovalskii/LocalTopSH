@@ -23,7 +23,7 @@ export const definition = {
   type: "function" as const,
   function: {
     name: "ask_user",
-    description: "Ask user a question with button options. Use when you need confirmation or choice from user. Returns the selected option.",
+    description: "Ask user a question with button options. ONLY works in PRIVATE chats (not groups). In groups, just ask in text.",
     parameters: {
       type: "object",
       properties: {

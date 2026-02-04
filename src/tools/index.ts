@@ -214,7 +214,12 @@ async function executeInternal(
       break;
     
     case 'ask_user':
-      result = await ask.execute(args as any, ctx.sessionId || 'default');
+      // Disable buttons in groups (anyone can click)
+      if (ctx.chatType && ctx.chatType !== 'private') {
+        result = { success: false, error: 'ask_user недоступен в группах. Задай вопрос текстом.' };
+      } else {
+        result = await ask.execute(args as any, ctx.sessionId || 'default');
+      }
       break;
     
     case 'memory':

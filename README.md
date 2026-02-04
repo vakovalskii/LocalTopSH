@@ -105,6 +105,22 @@ All settings in `src/config.ts`:
 | `reactions` | Emoji chance, weights |
 | `thoughts` | Autonomous messages interval |
 
+## Roadmap: Docker Sandboxes with MicroVM
+
+> 🚀 **Coming soon: MicroVM isolation!**
+> 
+> Docker announced [Docker Sandboxes](https://www.docker.com/blog/docker-sandboxes-run-claude-code-and-other-coding-agents-unsupervised-but-safely/) with **MicroVM-based isolation** (Jan 2026).
+> 
+> When **Linux support** arrives, we'll migrate from container isolation to MicroVM:
+> 
+> | Current | Future |
+> |---------|--------|
+> | Container isolation | **MicroVM isolation** (hypervisor-level) |
+> | Mount docker.sock | **Isolated Docker daemon** |
+> | Manual limits | **Built-in sandboxing** |
+> 
+> This will provide even stronger security boundaries with zero changes for users.
+
 ## Security
 
 **247 regex patterns** protecting against attacks:
