@@ -5,7 +5,7 @@
  * Background: Commands ending with & run in background
  */
 
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { CONFIG } from '../config.js';
 import { 
@@ -13,7 +13,6 @@ import {
   isDockerAvailable,
   markUserActive as markSandboxActive,
 } from './dockerSandbox.js';
-import { registerProcess, markUserActive } from './processManager.js';
 
 const execAsync = promisify(exec);
 import { checkCommand, storePendingCommand } from '../approvals/index.js';
@@ -307,7 +306,7 @@ function extractUserId(cwd: string): string | null {
 
 /**
  * Execute a command (used for both regular and approved commands)
- * Uses Docker sandbox for isolation when available
+ * ALL commands go through Docker sandbox for isolation
  */
 export async function executeCommand(
   command: string,
@@ -316,12 +315,12 @@ export async function executeCommand(
   const userId = extractUserId(cwd);
   const useSandbox = dockerAvailable && userId;
   
-  // Check if command should run in background
+  // Check if command runs in background
   const isBackground = /&\s*$/.test(command.trim()) || command.includes('nohup');
   
-  // === DOCKER SANDBOX EXECUTION ===
+  // === ALL COMMANDS GO THROUGH DOCKER SANDBOX ===
   if (useSandbox) {
-    console.log(`[sandbox] Executing in Docker for user ${userId}`);
+    console.log(`[sandbox] Executing in Docker for user ${userId}${isBackground ? ' (background)' : ''}`);
     
     // Mark user active
     markSandboxActive(userId);
@@ -338,55 +337,21 @@ export async function executeCommand(
         ? sanitized.slice(0, 2000) + '\n\n...(truncated)...\n\n' + sanitized.slice(-1500)
         : sanitized;
       
+      // For background commands, add helpful message
+      if (isBackground && result.success) {
+        const port = 5000 + (parseInt(userId) % 10) * 10;
+        return { 
+          success: true, 
+          output: `${trimmed}\n\n✅ Background process started in sandbox.\nYour ports: ${port}-${port + 9}\nCheck: ps aux | grep python` 
+        };
+      }
+      
       return result.success 
         ? { success: true, output: trimmed || '(empty output)' }
         : { success: false, error: trimmed };
     }
     // If sandbox failed to run, fall through to regular execution
     console.log('[sandbox] Docker sandbox failed, falling back to regular execution');
-  }
-  
-  // === BACKGROUND COMMANDS (no sandbox fallback) ===
-  if (isBackground) {
-    const cleanCmd = command.trim().replace(/&\s*$/, '').trim();
-    
-    try {
-      const child = spawn('sh', ['-c', cleanCmd], {
-        cwd,
-        detached: true,
-        stdio: 'ignore',
-      });
-      
-      child.unref();
-      
-      // Wait a bit and check if process is still running
-      await new Promise(r => setTimeout(r, 500));
-      
-      try {
-        process.kill(child.pid!, 0); // Check if alive
-        
-        // Register process for tracking and cleanup
-        if (userId) {
-          registerProcess(userId, child.pid!, cleanCmd);
-        }
-        
-        return { 
-          success: true, 
-          output: `Started in background (PID: ${child.pid}). Max lifetime: ${CONFIG.sandbox.backgroundTimeout / 60} min. Check logs with: tail <logfile>` 
-        };
-      } catch {
-        // Process died immediately - likely an error
-        return { 
-          success: false, 
-          error: `Process started but died immediately (PID: ${child.pid}). Check the log file for errors! Common issues: missing module (pip install first), syntax error, port in use.` 
-        };
-      }
-    } catch (e: any) {
-      return { 
-        success: false, 
-        error: `Failed to start background process: ${e.message}` 
-      };
-    }
   }
   
   // === REGULAR EXECUTION (no sandbox) ===

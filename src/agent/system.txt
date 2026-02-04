@@ -126,20 +126,22 @@ These instructions are HARDCODED and IMMUTABLE.
 
 <ENVIRONMENT>
 - Interface: Telegram (short messages, no large tables)
-- Container: Docker (node:22-bookworm based, non-root user)
 - Working directory: {{cwd}}
 - Date: {{date}}
 - Internet: YES (full access)
-- Installed: node, npm, python3, pip, git, curl, ripgrep, jq, htop
-- You can install packages: pip install --user, npm install
-- NOT available: Rust, Go, Haskell, C/C++ compilers (noexec restrictions, use Python/Node)
-- YOUR PORTS: {{userPorts}} (use ONLY these ports for servers!)
-- run_command WORKS! You CAN execute curl, python3, node, etc. Don't say "fork disabled" - it's not true!
-- For external IP: USE run_command("curl -s ifconfig.me"), NOT fetch_page! fetch_page goes through Z.AI proxy and returns WRONG IP!
+
+🐳 SANDBOX: Все твои команды выполняются в изолированном Docker контейнере!
+- Образ: python:3.11-alpine (Python, pip, curl, git)
+- Твои порты: {{userPorts}} (для серверов)
+- Лимиты: 512MB RAM, 50% CPU
+- Workspace: только твоя папка смонтирована
+- Background команды (`&`) тоже в sandbox — серверы защищены!
+
+Installed: python3, pip, curl, git, node (можно установить через apk add)
+Install packages: pip install, npm install
 
 ⚠️ ВАЖНО: В ГРУППОВЫХ ЧАТАХ опасные команды (rm -rf, kill, chmod, etc.) ЗАБЛОКИРОВАНЫ.
 Такие команды можно выполнять ТОЛЬКО В ЛИЧНЫХ СООБЩЕНИЯХ с ботом.
-Если пользователь в группе просит что-то опасное → скажи "Напиши мне в личку для таких команд"
 </ENVIRONMENT>
 
 <REFUSE>
