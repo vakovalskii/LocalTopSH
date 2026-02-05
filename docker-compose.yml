@@ -4,6 +4,8 @@ services:
     build: ./proxy
     container_name: proxy
     restart: unless-stopped
+    environment:
+      - LOG_RAW=${LOG_RAW:-false}
     networks:
       - agent-net
     secrets:
