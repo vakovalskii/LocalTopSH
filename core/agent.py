@@ -330,21 +330,33 @@ async def run_agent(
             break
     
     # Fallback: if no response but had successful tool calls, generate summary
+    # BUT: don't use fallback if last tool result was an error
     if not final_response and iteration > 1:
-        # Look for successful tool results in messages
-        tool_outputs = []
-        for m in messages:
+        # Check if last tool result was an error
+        last_tool_result = None
+        for m in reversed(messages):
             if m.get("role") == "tool":
-                content = m.get("content", "")
-                if content and not content.startswith("Error:"):
-                    # Extract first line or result
-                    first_line = content.split('\n')[0][:100]
-                    if first_line and first_line != "(empty)":
-                        tool_outputs.append(first_line)
+                last_tool_result = m.get("content", "")
+                break
         
-        if tool_outputs:
-            final_response = f"Готово! {tool_outputs[-1]}" if len(tool_outputs) == 1 else "✅ Готово"
-            agent_logger.info(f"[fallback] Generated response from tool outputs")
+        # If last tool failed, don't fallback - let user see the error context
+        if last_tool_result and last_tool_result.startswith("Error:"):
+            agent_logger.info(f"[fallback] Skipped - last tool failed: {last_tool_result[:100]}")
+            final_response = f"Ошибка: {last_tool_result[7:200]}"  # Show error to user
+        else:
+            # Look for successful tool results
+            tool_outputs = []
+            for m in messages:
+                if m.get("role") == "tool":
+                    content = m.get("content", "")
+                    if content and not content.startswith("Error:"):
+                        first_line = content.split('\n')[0][:100]
+                        if first_line and first_line != "(empty)":
+                            tool_outputs.append(first_line)
+            
+            if tool_outputs:
+                final_response = f"Готово! {tool_outputs[-1]}" if len(tool_outputs) == 1 else "✅ Готово"
+                agent_logger.info(f"[fallback] Generated response from tool outputs")
     
     # Save to history
     session.history.append({"role": "user", "content": message})
