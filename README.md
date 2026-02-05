@@ -14,227 +14,198 @@
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                              HOST (Docker)                               │
-├──────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌──────────────┐     ┌──────────────────────┐     ┌──────────────────┐  │
-│  │   Telegram   │     │       Gateway        │     │      Proxy       │  │
-│  │    Users     │◄───►│   Bot + ReAct Agent  │────►│   /run/secrets/  │  │
-│  └──────────────┘     │                      │     │  • api_key       │  │
-│                       │  /workspace/_shared/ │     │  • telegram_token│  │
-│                       │  • chats/*.md        │     │  • base_url      │  │
-│                       │  • GLOBAL_LOG.md     │     └──────────────────┘  │
-│                       └──────────┬───────────┘              │            │
-│                                  │                          │            │
-│                    Docker API    │              LLM API ◄───┘            │
-│                                  ▼                                       │
-│  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │                   Dynamic Sandbox Containers                       │  │
-│  │                   (python:3.11-alpine per user)                    │  │
-│  ├─────────────────┬─────────────────┬─────────────────┬──────────────┤  │
-│  │ sandbox_123     │ sandbox_456     │ sandbox_789     │              │  │
-│  │ ports:5000-5009 │ ports:5010-5019 │ ports:5020-5029 │    ...       │  │
-│  │                 │                 │                 │              │  │
-│  │ /workspace/123/ │ /workspace/456/ │ /workspace/789/ │              │  │
-│  │ • MEMORY.md     │ • MEMORY.md     │ • MEMORY.md     │              │  │
-│  │ • SESSION.json  │ • SESSION.json  │ • SESSION.json  │              │  │
-│  │ • gdrive_token  │ • user files    │ • user files    │              │  │
-│  │ • user files    │                 │                 │              │  │
-│  └─────────────────┴─────────────────┴─────────────────┴──────────────┘  │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+                              ┌─────────────────┐
+                              │    Telegram     │
+                              │      API        │
+                              └────────┬────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+              ▼                        ▼                        ▼
+       ┌─────────────┐          ┌─────────────┐          ┌─────────────┐
+       │     bot     │          │   userbot   │          │             │
+       │   aiogram   │          │  telethon   │          │             │
+       │   :4001     │          │    :8080    │          │             │
+       └──────┬──────┘          └──────┬──────┘          │             │
+              │                        │                 │             │
+              │         HTTP API       │                 │             │
+              └────────────┬───────────┘                 │             │
+                           │                             │             │
+                           ▼                             │             │
+                    ╔═════════════╗                      │             │
+                    ║    CORE     ║                      │             │
+                    ║   Agent     ║                      │   proxy     │
+                    ║  (FastAPI)  ║─────────────────────▶│   :3200     │
+                    ║   :4000     ║      LLM/Search      │             │
+                    ╠═════════════╣                      │  Secrets:   │
+                    ║ • ReAct     ║                      │  • api_key  │
+                    ║ • 14 Tools  ║                      │  • base_url │
+                    ║ • Scheduler ║                      │  • zai_key  │
+                    ║ • Security  ║                      └─────────────┘
+                    ╚══════┬══════╝
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+              ▼            ▼            ▼
+       ┌───────────┐ ┌───────────┐ ┌───────────┐
+       │ sandbox_1 │ │ sandbox_2 │ │ sandbox_N │
+       │  user123  │ │  user456  │ │   user... │
+       │ py:3.11   │ │ py:3.11   │ │ py:3.11   │
+       │ ports 5000│ │ ports 5010│ │ ports ... │
+       └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+             │             │             │
+             ▼             ▼             ▼
+       ┌───────────────────────────────────────┐
+       │           /workspace (volume)         │
+       │  /123/  │  /456/  │  /.../ │ /_shared │
+       └───────────────────────────────────────┘
 ```
 
-**Data Locations:**
-- `/workspace/_shared/chats/` — chat history per chat (all users see context)
-- `/workspace/{userId}/` — user files, memory, session, OAuth tokens
-- `/run/secrets/` — API keys (only Proxy has access, never Agent)
+**100% Python Stack:**
 
-**Key Security:**
-- Each user runs in **isolated Docker container**
-- Container sees only **own workspace** (not others)
-- **No access** to `/run/secrets`, `/app`, host filesystem
-- Limits: 512MB RAM, 50% CPU, 100 processes
-- Auto-cleanup: 60 min inactive → container removed
-- Secrets isolated via internal Proxy (agent never sees API keys)
+| Service | Stack | Port | Description |
+|---------|-------|------|-------------|
+| **core** | FastAPI | 4000 | ReAct Agent, 14 tools, scheduler, security |
+| **bot** | aiogram | 4001 | Telegram Bot API, reactions, thoughts |
+| **userbot** | Telethon | 8080 | User account bot (optional) |
+| **proxy** | aiohttp | 3200 | Secrets isolation, LLM/search proxy |
+| **sandbox_*** | python:slim | 5000-5999 | Per-user isolated containers |
 
-## Features
+## Core Agent
 
-- **ReAct Agent** with 13 tools (shell, files, web search, scheduler)
-- **Per-user Docker sandbox** with resource limits
-- **Secrets isolation** via Docker Secrets + internal Proxy
-- **Smart reactions** on messages (LLM-powered)
-- **Autonomous "thoughts"** in chat (LLM-generated from context)
-- **Anti-abuse**: 247 regex patterns, rate limits, DoS prevention
+The **core** is the brain of the system:
 
-## Tools (13)
+```
+core/
+├── main.py          # Entry + sandbox init
+├── agent.py         # ReAct loop (Think→Act→Observe)
+├── api.py           # HTTP endpoints for bot/userbot
+├── security.py      # 247 blocked patterns
+├── config.py        # All settings
+├── logger.py        # Centralized logging
+└── tools/           # 14 tools
+    ├── bash.py      # run_command (→ sandbox)
+    ├── sandbox.py   # Docker sandbox manager
+    ├── files.py     # read/write/edit/delete/search
+    ├── web.py       # search_web, fetch_page
+    ├── memory.py    # Persistent notes
+    ├── scheduler.py # Cron/reminders
+    ├── tasks.py     # Todo list
+    ├── send_file.py # Send files to chat
+    ├── send_dm.py   # Private messages
+    ├── message.py   # Edit/delete messages
+    └── ask_user.py  # Interactive questions
+```
+
+## Tools (14)
 
 | Tool | Description |
 |------|-------------|
-| `run_command` | Execute shell (runs in sandbox container) |
+| `run_command` | Execute shell in user's sandbox |
 | `read_file` | Read file content |
 | `write_file` | Create/overwrite file |
 | `edit_file` | Edit file (find & replace) |
 | `delete_file` | Delete file |
 | `search_files` | Find files by glob |
-| `search_text` | Search text in files |
+| `search_text` | Grep in files |
 | `list_directory` | List directory |
 | `search_web` | Web search (Z.AI) |
-| `fetch_page` | Fetch URL content |
-| `send_file` | Send file to chat |
-| `send_dm` | Send private message |
-| `memory` | Persistent notes across sessions |
+| `fetch_page` | Fetch URL as markdown |
+| `memory` | Persistent user notes |
+| `schedule_task` | Schedule reminders/cron |
+| `manage_tasks` | Session todo list |
+| `ask_user` | Ask question, wait answer |
+
+**Bot-only tools** (via HTTP callback):
+- `send_file` — Send file to chat
+- `send_dm` — Send private message
+- `manage_message` — Edit/delete bot messages
+
+## Dynamic Sandbox
+
+Each user gets isolated Docker container:
+
+- **Image**: `python:3.11-slim`
+- **Ports**: 10 ports per user (5000-5999)
+- **Resources**: 512MB RAM, 50% CPU, 100 PIDs
+- **Workspace**: Only own `/workspace/{user_id}/`
+- **TTL**: 10 min inactivity → auto-cleanup
+- **Security**: `no-new-privileges`, no secrets access
 
 ## Quick Start
 
 ```bash
-# 1. Create secrets folder
+# 1. Create secrets
 mkdir secrets
-
-# 2. Add required secrets
 echo "your-telegram-token" > secrets/telegram_token.txt
 echo "http://your-llm:8000/v1" > secrets/base_url.txt
 echo "your-llm-key" > secrets/api_key.txt
 echo "your-zai-key" > secrets/zai_api_key.txt
 
-# 3. Start
+# 2. Start
 docker compose up -d
 
-# 4. Check
+# 3. Check
 docker compose logs -f
 ```
 
-## Secrets Configuration
-
-All secrets are stored in `secrets/` folder (gitignored) and mounted via Docker Secrets.
-
-| Secret File | Required | Description |
-|-------------|----------|-------------|
-| `telegram_token.txt` | ✅ Yes | Telegram Bot API token from [@BotFather](https://t.me/BotFather) |
-| `base_url.txt` | ✅ Yes | LLM API endpoint (e.g., `http://your-llm:8000/v1`) |
-| `api_key.txt` | ✅ Yes | LLM API key |
-| `zai_api_key.txt` | ✅ Yes | Z.AI API key for web search ([z.ai](https://z.ai)) |
-| `gdrive_client_id.txt` | ❌ Optional | Google Drive OAuth Client ID |
-| `gdrive_client_secret.txt` | ❌ Optional | Google Drive OAuth Client Secret |
-
-**Security:** Secrets are only accessible by the Proxy container. The Agent (Gateway) never sees API keys — it routes requests through the internal Proxy.
-
-## Google Drive Integration
-
-Users can connect their Google Drive to access files directly from the bot.
-
-### Setup Google Drive (Optional)
-
-1. **Create Google Cloud Project**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create new project or select existing
-   - Enable **Google Drive API**
-
-2. **Create OAuth 2.0 Credentials**
-   - Go to **APIs & Services → Credentials**
-   - Click **Create Credentials → OAuth client ID**
-   - Application type: **Desktop app**
-   - Download JSON or copy Client ID and Client Secret
-
-3. **Configure OAuth Consent Screen**
-   - Go to **APIs & Services → OAuth consent screen**
-   - User type: **External** (or Internal for Workspace)
-   - Add scopes: `https://www.googleapis.com/auth/drive.readonly`
-   - Add test users (if in testing mode)
-
-4. **Add Secrets**
-   ```bash
-   echo "your-client-id.apps.googleusercontent.com" > secrets/gdrive_client_id.txt
-   echo "your-client-secret" > secrets/gdrive_client_secret.txt
-   ```
-
-5. **Restart**
-   ```bash
-   docker compose down && docker compose up -d
-   ```
-
-### User Flow
-
-1. User sends `/gdrive` or asks to connect Google Drive
-2. Bot returns OAuth URL
-3. User opens URL, grants access, gets redirect with code
-4. User sends code to bot
-5. Bot exchanges code for tokens, stores in user's workspace
-6. User can now: list files, search, download from their Drive
-
-### Google Drive Tools
-
-| Tool | Description |
-|------|-------------|
-| `gdrive_auth` | Start OAuth flow, get auth URL |
-| `gdrive_callback` | Exchange auth code for tokens |
-| `gdrive_list` | List files in Drive or folder |
-| `gdrive_search` | Search files by name |
-| `gdrive_download` | Download file to workspace |
-
-**Per-user tokens:** Each user's OAuth tokens are stored in their isolated workspace (`/workspace/{userId}/gdrive_token.json`). Users only access their own Drive.
-
-## Configuration
-
-All settings in `src/config.ts`:
-
-| Section | What it controls |
-|---------|------------------|
-| `rateLimit` | Telegram API limits |
-| `timeouts` | Tool execution, API calls |
-| `agent` | Max iterations, history |
-| `sandbox` | Container limits, TTL |
-| `reactions` | Emoji chance, weights |
-| `thoughts` | Autonomous messages interval |
-
-## Roadmap: Docker Sandboxes with MicroVM
-
-> 🚀 **Coming soon: MicroVM isolation!**
-> 
-> Docker announced [Docker Sandboxes](https://www.docker.com/blog/docker-sandboxes-run-claude-code-and-other-coding-agents-unsupervised-but-safely/) with **MicroVM-based isolation** (Jan 2026).
-> 
-> When **Linux support** arrives, we'll migrate from container isolation to MicroVM:
-> 
-> | Current | Future |
-> |---------|--------|
-> | Container isolation | **MicroVM isolation** (hypervisor-level) |
-> | Mount docker.sock | **Isolated Docker daemon** |
-> | Manual limits | **Built-in sandboxing** |
-> 
-> This will provide even stronger security boundaries with zero changes for users.
-
 ## Security
 
-**247 regex patterns** protecting against attacks:
-- 191 BLOCKED (never allowed)
-- 56 DANGEROUS (require approval)
+**266+ protection patterns:**
+- 247 blocked shell command patterns
+- 19 prompt injection patterns
 
-Categories:
-- Secrets: env, /proc/environ, /run/secrets, process.env
-- Exfiltration: base64 encode, curl POST, HTTP servers reading secrets
-- DoS: fork bombs, zip bombs, huge allocations
-- Escape: other workspaces, host filesystem, Docker socket
+**Layers:**
+1. **Sandbox isolation** — each user in separate container
+2. **Workspace separation** — users can't access each other's files
+3. **Secrets via Proxy** — agent never sees API keys
+4. **Command blocking** — env, /proc, secrets paths blocked
+5. **Output sanitization** — secrets redacted from output
+6. **Rate limiting** — Telegram API, groups, reactions
 
-Architecture:
-- **Docker sandbox** per user (dynamic containers)
-- **Docker Secrets** for all API keys  
-- **Internal proxy** isolates secrets from agent
-- **Per-user workspace** isolation (only own dir mounted)
-
-## Structure
+## Project Structure
 
 ```
-├── docker-compose.yml    # Gateway + Proxy
+LocalTopSH/
+├── docker-compose.yml
 ├── secrets/              # API keys (gitignored)
-├── proxy/                # Internal API proxy
-└── src/
-    ├── config.ts         # All settings
-    ├── agent/            # ReAct loop
-    ├── bot/              # Telegram bot
-    ├── approvals/        # Security patterns
-    └── tools/            # 13 tools + Docker sandbox
+│
+├── core/                 # ReAct Agent (Python/FastAPI)
+│   ├── main.py
+│   ├── agent.py         # ReAct loop
+│   ├── api.py           # HTTP API
+│   ├── security.py      # Blocked patterns
+│   ├── tools/           # 14 tools
+│   └── Dockerfile
+│
+├── bot/                  # Telegram Bot (Python/aiogram)
+│   ├── main.py
+│   ├── handlers.py
+│   ├── thoughts.py      # Autonomous messages
+│   ├── security.py      # Prompt injection
+│   └── Dockerfile
+│
+├── userbot/              # Telegram Userbot (Python/Telethon)
+│   ├── main.py
+│   └── Dockerfile
+│
+├── proxy/                # API Proxy (Python/aiohttp)
+│   ├── main.py
+│   └── Dockerfile
+│
+└── workspace/            # User data (gitignored)
+    ├── {user_id}/       # Per-user workspace
+    └── _shared/         # Shared data
 ```
+
+## Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `telegram_token.txt` | ✅ | Bot token from @BotFather |
+| `base_url.txt` | ✅ | LLM API URL |
+| `api_key.txt` | ✅ | LLM API key |
+| `zai_api_key.txt` | ✅ | Z.AI search key |
 
 ## License
 

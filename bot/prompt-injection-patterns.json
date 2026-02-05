@@ -1,0 +1,101 @@
+{
+  "description": "Prompt injection detection patterns for incoming messages",
+  "version": "1.0.0",
+  "patterns": [
+    {
+      "id": "forget-ru-1",
+      "pattern": "забудь\\s+(все\\s+)?(инструкции|правила|промпт)",
+      "reason": "Attempt to reset instructions (RU)"
+    },
+    {
+      "id": "forget-en-1",
+      "pattern": "forget\\s+(all\\s+)?(instructions|rules|prompt)",
+      "reason": "Attempt to reset instructions (EN)"
+    },
+    {
+      "id": "ignore-en-1",
+      "pattern": "ignore\\s+(previous|all|your)\\s+(instructions|rules|prompt)",
+      "reason": "Attempt to bypass instructions"
+    },
+    {
+      "id": "system-tag-1",
+      "pattern": "\\[system\\]",
+      "reason": "Fake system message"
+    },
+    {
+      "id": "system-tag-2",
+      "pattern": "\\[admin\\]",
+      "reason": "Fake admin message"
+    },
+    {
+      "id": "system-tag-3",
+      "pattern": "\\[developer\\]",
+      "reason": "Fake developer message"
+    },
+    {
+      "id": "mode-switch-1",
+      "pattern": "developer\\s+mode",
+      "reason": "Developer mode bypass attempt"
+    },
+    {
+      "id": "mode-switch-2",
+      "pattern": "DAN\\s+mode",
+      "reason": "DAN jailbreak attempt"
+    },
+    {
+      "id": "jailbreak-1",
+      "pattern": "jailbreak",
+      "reason": "Explicit jailbreak attempt"
+    },
+    {
+      "id": "new-instructions-1",
+      "pattern": "new\\s+instructions?\\s*:",
+      "reason": "Attempt to inject new instructions"
+    },
+    {
+      "id": "pretend-1",
+      "pattern": "pretend\\s+(you\\s+)?(are|to\\s+be)",
+      "reason": "Role confusion attempt"
+    },
+    {
+      "id": "act-as-1",
+      "pattern": "act\\s+as\\s+(if|a|an)",
+      "reason": "Role override attempt"
+    },
+    {
+      "id": "override-1",
+      "pattern": "override\\s+(your|all|previous)",
+      "reason": "System override attempt"
+    },
+    {
+      "id": "disregard-1",
+      "pattern": "disregard\\s+(your|all|previous)",
+      "reason": "Disregard instructions attempt"
+    },
+    {
+      "id": "you-are-now-1",
+      "pattern": "you\\s+are\\s+now\\s+(a|an|in)",
+      "reason": "Identity override attempt"
+    },
+    {
+      "id": "reset-1",
+      "pattern": "reset\\s+(to|your)\\s+(default|factory|original)",
+      "reason": "Reset attempt"
+    },
+    {
+      "id": "reveal-1",
+      "pattern": "reveal\\s+(your|the)\\s+(system|prompt|instructions)",
+      "reason": "Prompt extraction attempt"
+    },
+    {
+      "id": "show-prompt-1",
+      "pattern": "show\\s+(me\\s+)?(your|the)\\s+(system|prompt|instructions)",
+      "reason": "Prompt extraction attempt"
+    },
+    {
+      "id": "bypass-1",
+      "pattern": "bypass\\s+(your|all|any)\\s+(safety|security|filter)",
+      "reason": "Safety bypass attempt"
+    }
+  ]
+}

@@ -7,14 +7,11 @@ services:
     networks:
       - agent-net
     secrets:
-      - source: base_url
-        mode: 0444
-      - source: api_key
-        mode: 0444
-      - source: zai_api_key
-        mode: 0444
+      - base_url
+      - api_key
+      - zai_api_key
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3200/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3200/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -25,40 +22,32 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # ============ GATEWAY - Telegram bot + Agent ============
-  gateway:
-    build: .
-    container_name: gateway
+  # ============ CORE - Agent + Tools + HTTP API ============
+  core:
+    build: ./core
+    container_name: core
     restart: unless-stopped
     depends_on:
       proxy:
         condition: service_healthy
     environment:
-      # NO API KEYS HERE! Only proxy URL
       - PROXY_URL=http://proxy:3200
       - MODEL_NAME=openai/gpt-oss-120b
-      - MCP_PORT=3100
-      - MCP_URL=http://localhost:3100
       - WORKSPACE=/workspace
+      - WORKSPACE_HOST_PATH=${PWD}/workspace
       - EXPOSED_PORTS=5000-5099
-      - MAX_CONCURRENT_USERS=10
       - AGENT_CWD=/workspace
+      - API_PORT=4000
+      - BOT_URL=http://bot:4001
+      - USERBOT_URL=http://userbot:8080
     secrets:
-      - source: telegram_token
-        mode: 0444
-      - source: gdrive_client_id
-        mode: 0444
-      - source: gdrive_client_secret
-        mode: 0444
+      - gdrive_client_id
+      - gdrive_client_secret
     volumes:
       - ./workspace:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker API for sandboxing
-    # Ports 5000-5099 are used by sandbox containers (created dynamically)
-    # No ports needed on gateway itself
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - agent-net
-    
-    # ============ SECURITY HARDENING ============
     cap_drop:
       - ALL
     cap_add:
@@ -80,11 +69,75 @@ services:
     tmpfs:
       - /tmp:size=100M,mode=1777
     healthcheck:
-      test: ["CMD", "node", "-e", "console.log('ok')"]
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ============ BOT - Telegram Bot (Telegraf) ============
+  bot:
+    build: ./bot
+    container_name: bot
+    restart: unless-stopped
+    depends_on:
+      core:
+        condition: service_healthy
+    environment:
+      - CORE_URL=http://core:4000
+      - PROXY_URL=http://proxy:3200
+      - MODEL_NAME=openai/gpt-oss-120b
+      - BOT_PORT=4001
+      - MAX_CONCURRENT_USERS=10
+      - ADMIN_USER_ID=${ADMIN_USER_ID:-809532582}
+    secrets:
+      - telegram_token
+    networks:
+      - agent-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # ============ USERBOT - Telethon agent ============
+  userbot:
+    build: ./userbot
+    container_name: userbot
+    restart: unless-stopped
+    profiles:
+      - userbot
+    depends_on:
+      core:
+        condition: service_healthy
+    environment:
+      - CORE_URL=http://core:4000
+      - RESPONSE_CHANCE_DM=1.0
+      - RESPONSE_CHANCE_GROUP=0.1
+      - RESPONSE_CHANCE_MENTION=1.0
+      - RESPONSE_CHANCE_REPLY=1.0
+      - COOLDOWN_SECONDS=0
+      - OWNER_ID=${OWNER_ID:-809532582,65341407}
+      - OWNER_ONLY=true
+    secrets:
+      - telegram_api_id
+      - telegram_api_hash
+      - telegram_phone
+    volumes:
+      - ./userbot/session:/app/session
+    networks:
+      - agent-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 # ============ SECRETS ============
 secrets:
@@ -100,6 +153,12 @@ secrets:
     file: ./secrets/gdrive_client_id.txt
   gdrive_client_secret:
     file: ./secrets/gdrive_client_secret.txt
+  telegram_api_id:
+    file: ./secrets/telegram_api_id.txt
+  telegram_api_hash:
+    file: ./secrets/telegram_api_hash.txt
+  telegram_phone:
+    file: ./secrets/telegram_phone.txt
 
 networks:
   agent-net:

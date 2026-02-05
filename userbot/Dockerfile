@@ -1,3 +1,4 @@
+# Userbot - Telethon-based agent
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -6,12 +7,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy code
 COPY main.py .
+COPY system.txt .
 
-# Run as non-root user (uid 1000) - matches Docker secrets ownership
-RUN useradd -u 1000 -m appuser
-USER appuser
-
-EXPOSE 3200
+# Create session directory
+RUN mkdir -p session
 
 CMD ["python", "-u", "main.py"]

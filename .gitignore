@@ -35,3 +35,4 @@ workspace/
 .valera/
 secrets/
 .cursor/
+userbot/session/*.session
