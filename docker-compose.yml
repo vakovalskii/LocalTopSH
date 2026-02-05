@@ -95,6 +95,8 @@ services:
       - ADMIN_USER_ID=${ADMIN_USER_ID:-809532582}
     secrets:
       - telegram_token
+    volumes:
+      - ./workspace:/workspace:ro
     networks:
       - agent-net
     deploy:
@@ -134,6 +136,7 @@ services:
       - telegram_phone
     volumes:
       - ./userbot/session:/app/session
+      - ./workspace:/workspace:ro
     networks:
       - agent-net
     deploy:

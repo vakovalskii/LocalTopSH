@@ -17,25 +17,34 @@ async def tool_send_file(args: dict, ctx: ToolContext) -> ToolResult:
     path = args.get("path", "")
     caption = args.get("caption", "")
     
+    tool_logger.info(f"[send_file] Called with path={path}, cwd={ctx.cwd}")
+    
     if not path:
         return ToolResult(False, error="Path required")
     
     # Normalize path
+    original_path = path
     path = normalize_path(path, ctx.cwd)
+    tool_logger.info(f"[send_file] Normalized: {original_path} -> {path}")
     
     # Check file exists (with retry for race condition / sync delay)
     for attempt in range(5):
-        if os.path.exists(path):
-            # Also check file size > 0 (not still being written)
-            try:
-                if os.path.getsize(path) > 0:
-                    break
-            except:
-                pass
-        tool_logger.info(f"File not ready yet, waiting... ({attempt+1}/5)")
+        exists = os.path.exists(path)
+        size = os.path.getsize(path) if exists else 0
+        tool_logger.info(f"[send_file] Attempt {attempt+1}/5: exists={exists}, size={size}")
+        
+        if exists and size > 0:
+            break
         await asyncio.sleep(2)
     
     if not os.path.exists(path):
+        # List dir to debug
+        dir_path = os.path.dirname(path)
+        try:
+            files = os.listdir(dir_path) if os.path.isdir(dir_path) else []
+            tool_logger.warning(f"[send_file] Dir {dir_path} contents: {files[:10]}")
+        except Exception as e:
+            tool_logger.warning(f"[send_file] Can't list dir: {e}")
         return ToolResult(False, error=f"File not found: {path}")
     
     # Check file size
