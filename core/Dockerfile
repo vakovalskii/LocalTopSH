@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all Python modules
 COPY *.py ./
 COPY tools/ ./tools/
+COPY tests/ ./tests/
 
 # Copy config files from src/
 COPY src/agent/system.txt ./src/agent/
