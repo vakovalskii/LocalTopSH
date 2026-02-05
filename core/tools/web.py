@@ -9,6 +9,9 @@ from config import CONFIG
 from logger import tool_logger
 from models import ToolResult, ToolContext
 
+# Store last search results per session for result_id lookup
+_search_results_cache: dict[str, list[dict]] = {}
+
 
 async def tool_search_web(args: dict, ctx: ToolContext) -> ToolResult:
     """Search the web via proxy"""
@@ -31,6 +34,9 @@ async def tool_search_web(args: dict, ctx: ToolContext) -> ToolResult:
         if not results:
             return ToolResult(True, output="(no results)")
         
+        # Cache results for result_id lookup
+        _search_results_cache[ctx.session_id] = results[:10]
+        
         output = []
         for i, r in enumerate(results[:10], 1):
             date = f" ({r.get('publish_date', '')})" if r.get('publish_date') else ""
@@ -47,6 +53,23 @@ async def tool_search_web(args: dict, ctx: ToolContext) -> ToolResult:
 async def tool_fetch_page(args: dict, ctx: ToolContext) -> ToolResult:
     """Fetch URL content"""
     url = args.get("url", "")
+    result_id = args.get("result_id") or args.get("cursor") or args.get("id")
+    
+    # If result_id provided, look up URL from cached search results
+    if result_id and not url:
+        try:
+            idx = int(result_id) - 1  # Convert 1-based to 0-based
+            cached = _search_results_cache.get(ctx.session_id, [])
+            if 0 <= idx < len(cached):
+                url = cached[idx].get("link", "")
+                tool_logger.info(f"Resolved result_id {result_id} to URL: {url}")
+            else:
+                return ToolResult(False, error=f"Result {result_id} not found (have {len(cached)} cached results)")
+        except (ValueError, TypeError):
+            return ToolResult(False, error=f"Invalid result_id: {result_id}")
+    
+    if not url:
+        return ToolResult(False, error="url or result_id required")
     
     # Block internal URLs
     blocked = ["169.254.169.254", "localhost", "127.", "10.", "192.168.", "172."]

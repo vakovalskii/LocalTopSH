@@ -68,6 +68,14 @@ import json
 
 LOG_RAW = os.getenv("LOG_RAW", "false").lower() == "true"
 
+def pretty_json(data: bytes) -> str:
+    """Pretty print JSON with UTF-8"""
+    try:
+        obj = json.loads(data)
+        return json.dumps(obj, indent=2, ensure_ascii=False)
+    except:
+        return data.decode('utf-8', errors='replace')
+
 async def proxy_llm(request: web.Request) -> web.StreamResponse:
     """Proxy /v1/* requests to LLM API with auth"""
     if not LLM_BASE_URL:
@@ -94,65 +102,10 @@ async def proxy_llm(request: web.Request) -> web.StreamResponse:
             
             # Log raw request if enabled
             if LOG_RAW and body:
-                try:
-                    data = json.loads(body)
-                    log.info("=" * 80)
-                    log.info("RAW LLM REQUEST:")
-                    log.info(f"  model: {data.get('model', '?')}")
-                    
-                    messages = data.get("messages", [])
-                    log.info(f"  messages: {len(messages)}")
-                    for i, msg in enumerate(messages):
-                        role = msg.get("role", "?")
-                        content = msg.get("content", "")
-                        tool_calls = msg.get("tool_calls", [])
-                        tool_call_id = msg.get("tool_call_id", "")
-                        
-                        if role == "system":
-                            log.info(f"    [{i}] SYSTEM ({len(content)} chars):")
-                            # Print first 500 and last 200 chars
-                            if len(content) > 800:
-                                log.info(f"      {content[:500]}")
-                                log.info(f"      ... [{len(content)-700} chars] ...")
-                                log.info(f"      {content[-200:]}")
-                            else:
-                                for line in content.split('\n')[:30]:
-                                    log.info(f"      {line}")
-                        elif role == "user":
-                            log.info(f"    [{i}] USER:")
-                            for line in content.split('\n'):
-                                log.info(f"      {line}")
-                        elif role == "assistant":
-                            if tool_calls:
-                                log.info(f"    [{i}] ASSISTANT (tool_calls):")
-                                for tc in tool_calls:
-                                    fn = tc.get("function", {})
-                                    log.info(f"      → {fn.get('name')}({fn.get('arguments', '')})")
-                            elif content:
-                                log.info(f"    [{i}] ASSISTANT:")
-                                for line in content.split('\n'):
-                                    log.info(f"      {line}")
-                            else:
-                                log.info(f"    [{i}] ASSISTANT: (empty)")
-                        elif role == "tool":
-                            log.info(f"    [{i}] TOOL [{tool_call_id[:12]}]:")
-                            # Truncate long tool output
-                            if len(content) > 500:
-                                log.info(f"      {content[:400]}")
-                                log.info(f"      ... [{len(content)-400} chars more] ...")
-                            else:
-                                for line in content.split('\n')[:20]:
-                                    log.info(f"      {line}")
-                    
-                    tools = data.get("tools", [])
-                    log.info(f"  tools: {len(tools)} definitions")
-                    for t in tools:
-                        fn = t.get("function", {})
-                        log.info(f"    - {fn.get('name')}")
-                    
-                    log.info("=" * 80)
-                except Exception as e:
-                    log.warning(f"Failed to parse request body: {e}")
+                log.info("=" * 80)
+                log.info("RAW REQUEST JSON:")
+                print(pretty_json(body))
+                log.info("=" * 80)
             
             # Collect response for logging
             response_chunks = []
@@ -181,38 +134,11 @@ async def proxy_llm(request: web.Request) -> web.StreamResponse:
                 
                 # Log raw response
                 if LOG_RAW and response_chunks:
-                    try:
-                        full_response = b''.join(response_chunks)
-                        data = json.loads(full_response)
-                        log.info("=" * 80)
-                        log.info("RAW LLM RESPONSE:")
-                        log.info(f"  id: {data.get('id', '?')}")
-                        log.info(f"  model: {data.get('model', '?')}")
-                        
-                        for i, choice in enumerate(data.get("choices", [])):
-                            msg = choice.get("message", {})
-                            finish = choice.get("finish_reason", "?")
-                            content = msg.get("content", "")
-                            tool_calls = msg.get("tool_calls", [])
-                            
-                            log.info(f"  choice[{i}] finish_reason: {finish}")
-                            
-                            if tool_calls:
-                                log.info(f"  choice[{i}] tool_calls:")
-                                for tc in tool_calls:
-                                    fn = tc.get("function", {})
-                                    log.info(f"    → {fn.get('name')}({fn.get('arguments', '')})")
-                            
-                            if content:
-                                log.info(f"  choice[{i}] content:")
-                                for line in content.split('\n'):
-                                    log.info(f"    {line}")
-                        
-                        usage = data.get("usage", {})
-                        log.info(f"  usage: prompt={usage.get('prompt_tokens')}, completion={usage.get('completion_tokens')}, total={usage.get('total_tokens')}")
-                        log.info("=" * 80)
-                    except Exception as e:
-                        log.warning(f"Failed to parse response: {e}")
+                    full_response = b''.join(response_chunks)
+                    log.info("=" * 80)
+                    log.info("RAW RESPONSE JSON:")
+                    print(pretty_json(full_response))
+                    log.info("=" * 80)
                 
                 return response
                 
