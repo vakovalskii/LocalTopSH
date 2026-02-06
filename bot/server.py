@@ -3,7 +3,7 @@
 import os
 import logging
 from aiohttp import web
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, BufferedInputFile
 
 from state import bot
 from formatters import md_to_html
@@ -37,26 +37,44 @@ async def handle_send(request):
 
 
 async def handle_send_file(request):
-    """Send file to chat"""
+    """Send file to chat
+    
+    Accepts multipart form with:
+    - chat_id: target chat
+    - caption: optional caption
+    - file: file bytes (from core, not a path)
+    
+    Security: Bot does NOT have workspace volume access.
+    Core reads file and sends bytes here.
+    """
     try:
-        data = await request.json()
-        chat_id = data.get("chat_id")
-        file_path = data.get("file_path")
-        caption = data.get("caption", "")
+        # Parse multipart form
+        reader = await request.multipart()
         
-        if not chat_id or not file_path:
-            return web.json_response({"success": False, "error": "Missing chat_id or file_path"}, status=400)
+        chat_id = None
+        caption = ""
+        file_content = None
+        filename = "file"
         
-        if not os.path.exists(file_path):
-            return web.json_response({"success": False, "error": f"File not found: {file_path}"}, status=404)
+        async for part in reader:
+            if part.name == "chat_id":
+                chat_id = int(await part.text())
+            elif part.name == "caption":
+                caption = await part.text()
+            elif part.name == "file":
+                filename = part.filename or "file"
+                file_content = await part.read()
         
-        file_size = os.path.getsize(file_path)
-        if file_size > 50 * 1024 * 1024:  # 50MB limit
+        if not chat_id or file_content is None:
+            return web.json_response({"success": False, "error": "Missing chat_id or file"}, status=400)
+        
+        if len(file_content) > 50 * 1024 * 1024:  # 50MB limit
             return web.json_response({"success": False, "error": "File too large (max 50MB)"}, status=413)
         
-        file = FSInputFile(file_path)
+        # Send using BufferedInputFile (from bytes, not path)
+        file = BufferedInputFile(file_content, filename=filename)
         result = await bot.send_document(chat_id, file, caption=caption[:1024] if caption else None)
-        logger.info(f"[server] Sent file {file_path} to {chat_id}")
+        logger.info(f"[server] Sent file {filename} ({len(file_content)} bytes) to {chat_id}")
         
         return web.json_response({"success": True, "message_id": result.message_id})
     except Exception as e:
