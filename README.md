@@ -1,4 +1,6 @@
-# LocalTopSH 🐧
+# Agentic Core SDK
+
+### LocalTopSH 🐧
 
 **AI Agent with full system access, sandboxed per user.**
 
