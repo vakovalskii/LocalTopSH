@@ -35,9 +35,13 @@ def normalize_path(input_path: str, cwd: str) -> str:
 
 
 def is_path_safe(path: str, cwd: str) -> tuple[bool, str]:
-    """Check if path is within workspace"""
+    """Check if path is within workspace or allowed directories"""
     resolved = os.path.realpath(path)
     resolved_cwd = os.path.realpath(cwd)
+    
+    # Allow reading from /data/skills/ (skills are read-only)
+    if resolved.startswith("/data/skills") and (resolved == "/data/skills" or resolved.startswith("/data/skills/")):
+        return True, ""
     
     if not resolved.startswith(resolved_cwd):
         return False, "Path outside workspace"

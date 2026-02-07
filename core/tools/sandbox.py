@@ -150,6 +150,11 @@ async def get_or_create_container(user_id: str) -> Optional[UserContainer]:
                 f"{WORKSPACE_HOST}/{user_id}": {
                     "bind": f"/workspace/{user_id}",
                     "mode": "rw"
+                },
+                # Skills directory (read-only for on-demand loading)
+                f"{WORKSPACE_HOST}/_shared/skills": {
+                    "bind": "/data/skills",
+                    "mode": "ro"
                 }
             },
             ports=port_bindings,
