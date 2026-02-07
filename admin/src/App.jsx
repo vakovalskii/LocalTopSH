@@ -8,6 +8,7 @@ import Users from './pages/Users'
 import Tools from './pages/Tools'
 import MCP from './pages/MCP'
 import Skills from './pages/Skills'
+import Tasks from './pages/Tasks'
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
           <NavLink to="/tools">🔧 Tools</NavLink>
           <NavLink to="/mcp">🔌 MCP</NavLink>
           <NavLink to="/skills">🎯 Skills</NavLink>
+          <NavLink to="/tasks">⏰ Tasks</NavLink>
           <NavLink to="/users">👥 Users</NavLink>
           <NavLink to="/logs">📜 Logs</NavLink>
         </nav>
@@ -37,6 +39,7 @@ function App() {
           <Route path="/tools" element={<Tools />} />
           <Route path="/mcp" element={<MCP />} />
           <Route path="/skills" element={<Skills />} />
+          <Route path="/tasks" element={<Tasks />} />
           <Route path="/users" element={<Users />} />
           <Route path="/logs" element={<Logs />} />
         </Routes>

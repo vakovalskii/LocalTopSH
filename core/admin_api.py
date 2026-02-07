@@ -890,3 +890,81 @@ async def uninstall_skill(name: str):
                     raise HTTPException(resp.status, "Failed to uninstall")
     except aiohttp.ClientError as e:
         raise HTTPException(503, f"Tools API unavailable: {e}")
+
+
+# ============ SCHEDULED TASKS ============
+
+from tools.scheduler import scheduler
+
+@router.get("/tasks")
+async def get_all_tasks():
+    """Get all scheduled tasks"""
+    tasks = []
+    now = datetime.now().timestamp()
+    
+    for task_id, task in scheduler.tasks.items():
+        time_left = int((task.execute_at - now) / 60)
+        next_run = datetime.fromtimestamp(task.execute_at).strftime("%Y-%m-%d %H:%M:%S")
+        created = datetime.fromtimestamp(task.created_at).strftime("%Y-%m-%d %H:%M:%S")
+        
+        tasks.append({
+            "id": task_id,
+            "user_id": task.user_id,
+            "chat_id": task.chat_id,
+            "type": task.task_type,
+            "content": task.content,
+            "next_run": next_run,
+            "time_left_minutes": time_left,
+            "recurring": task.recurring,
+            "interval_minutes": task.interval_minutes,
+            "source": task.source,
+            "created_at": created
+        })
+    
+    # Sort by next_run
+    tasks.sort(key=lambda x: x["next_run"])
+    
+    return {"tasks": tasks, "total": len(tasks)}
+
+
+@router.get("/tasks/user/{user_id}")
+async def get_user_tasks(user_id: int):
+    """Get tasks for a specific user"""
+    tasks = []
+    now = datetime.now().timestamp()
+    
+    user_task_ids = scheduler.user_tasks.get(user_id, set())
+    
+    for task_id in user_task_ids:
+        task = scheduler.tasks.get(task_id)
+        if task:
+            time_left = int((task.execute_at - now) / 60)
+            next_run = datetime.fromtimestamp(task.execute_at).strftime("%Y-%m-%d %H:%M:%S")
+            
+            tasks.append({
+                "id": task_id,
+                "type": task.task_type,
+                "content": task.content,
+                "next_run": next_run,
+                "time_left_minutes": time_left,
+                "recurring": task.recurring,
+                "interval_minutes": task.interval_minutes,
+                "source": task.source
+            })
+    
+    return {"tasks": tasks, "user_id": user_id}
+
+
+@router.delete("/tasks/{task_id}")
+async def cancel_task(task_id: str, admin_override: bool = True):
+    """Cancel a scheduled task (admin can cancel any task)"""
+    task = scheduler.tasks.get(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    
+    user_id = task.user_id
+    scheduler.tasks.pop(task_id, None)
+    if user_id in scheduler.user_tasks:
+        scheduler.user_tasks[user_id].discard(task_id)
+    
+    return {"success": True, "message": f"Task {task_id} cancelled"}

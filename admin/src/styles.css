@@ -561,6 +561,16 @@ input:checked + .toggle-slider:before {
   color: var(--danger);
 }
 
+.badge-primary {
+  background: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.badge-secondary {
+  background: rgba(156, 163, 175, 0.2);
+  color: #9ca3af;
+}
+
 /* Button small */
 .btn-small {
   padding: 6px 10px;
