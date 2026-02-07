@@ -86,6 +86,28 @@ Always be helpful and concise. Think step by step when solving complex problems.
 """
 
 
+async def load_skill_prompts(user_id: str = None) -> str:
+    """Load system prompts from enabled skills"""
+    tools_api_url = os.getenv("TOOLS_API_URL", "http://tools-api:8100")
+    
+    try:
+        url = f"{tools_api_url}/skills/prompts/all"
+        if user_id:
+            url += f"?user_id={user_id}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    prompts = data.get("prompts", [])
+                    if prompts:
+                        return "\n\n" + "\n\n".join(prompts)
+    except Exception as e:
+        agent_logger.warning(f"Failed to load skill prompts: {e}")
+    
+    return ""
+
+
 def trim_history(history: list, max_msgs: int, max_chars: int) -> list:
     """Keep history within limits"""
     if len(history) > max_msgs:
@@ -364,10 +386,14 @@ async def run_agent(
     
     # Build system message
     system_prompt = load_system_prompt()
+    
+    # Add skill prompts (loaded from tools-api)
+    skill_prompts = await load_skill_prompts(str(user_id))
+    
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     workspace_info = f"\nUser: @{username} (id={user_id})\nWorkspace: {session.cwd}\nTime: {timestamp}\nSource: {source}"
     
-    messages = [{"role": "system", "content": system_prompt + workspace_info}]
+    messages = [{"role": "system", "content": system_prompt + skill_prompts + workspace_info}]
     messages.extend(session.history)
     messages.append({"role": "user", "content": message})
     

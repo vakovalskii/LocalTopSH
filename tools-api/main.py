@@ -375,13 +375,22 @@ class SkillsManager:
                 try:
                     with open(skill_file) as f:
                         data = json.load(f)
+                        
+                        # Load system_prompt from file if specified
+                        system_prompt = data.get("system_prompt")
+                        if data.get("system_prompt_file"):
+                            prompt_file = os.path.join(skill_dir, data["system_prompt_file"])
+                            if os.path.exists(prompt_file):
+                                with open(prompt_file) as pf:
+                                    system_prompt = pf.read()
+                        
                         skill = Skill(
                             name=data.get("name", item),
                             description=data.get("description", ""),
                             version=data.get("version", "1.0"),
                             author=data.get("author"),
                             tools=data.get("tools", []),
-                            system_prompt=data.get("system_prompt"),
+                            system_prompt=system_prompt,
                             resources=data.get("resources", []),
                             commands=data.get("commands", {}),
                             enabled=data.get("enabled", True),
