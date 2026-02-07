@@ -25,6 +25,48 @@
 > 
 > **Result: 0 secrets leaked, 0 downtime. The Pentagram holds.**
 
+---
+
+## Philosophy: Engineering Over Subscription Abuse
+
+Unlike projects that rely on abusing consumer subscriptions (Claude Max, ChatGPT Plus) through browser automation and cookie theft, **LocalTopSH is built on honest engineering principles**:
+
+| Approach | LocalTopSH ✅ | Subscription Abuse ❌ |
+|----------|--------------|----------------------|
+| **LLM Access** | Your own API keys | Stolen browser sessions |
+| **Cost Model** | Pay for what you use | Violate ToS, risk bans |
+| **Reliability** | 100% uptime (your infra) | Breaks when UI changes |
+| **Security** | Full control over secrets | Cookies stored who-knows-where |
+| **Ethics** | Transparent & legal | Gray area at best |
+
+### Why This Matters
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  "Free" subscription abuse:                                     │
+│                                                                 │
+│  User ──▶ Sketchy proxy ──▶ Stolen cookies ──▶ Claude.ai       │
+│              ↓                                                  │
+│         Your data goes through untrusted infrastructure         │
+│         One ToS update = everything breaks                      │
+│         Account ban = you lose access                           │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  LocalTopSH (honest engineering):                               │
+│                                                                 │
+│  User ──▶ Your bot ──▶ Your proxy ──▶ Official API             │
+│              ↓                                                  │
+│         Full control over your infrastructure                   │
+│         API is stable, documented, supported                    │
+│         You own your data and your costs                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**We believe in building real infrastructure, not hacks that break tomorrow.**
+
+---
+
 ## Architecture
 
 ```
