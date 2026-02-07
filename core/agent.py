@@ -11,7 +11,7 @@ from pathlib import Path
 
 from config import CONFIG
 from logger import agent_logger, log_agent_step
-from tools import execute_tool
+from tools import execute_tool, filter_tools_for_session
 from models import ToolContext
 
 # Cache for tool definitions
@@ -388,6 +388,10 @@ async def run_agent(
     
     # Get tool definitions from API (filtered by source)
     tool_definitions = await get_tool_definitions(source)
+    
+    # Filter tools based on session type permissions
+    tool_definitions = filter_tools_for_session(tool_definitions, chat_type, source)
+    agent_logger.info(f"Available tools for {chat_type}/{source}: {len(tool_definitions)}")
     
     while iteration < CONFIG.max_iterations:
         iteration += 1

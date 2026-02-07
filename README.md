@@ -1,8 +1,20 @@
-# Agentic Core SDK
+# ⛧ LocalTopSH
 
-### LocalTopSH 🐧
+### *"Per aspera ad securitatem"* 🐧
 
-**AI Agent with full system access, sandboxed per user.**
+**AI Agent with full system access, protected by the Pentagram.**
+
+```
+            *
+           / \
+          /   \
+         / (o) \
+        / AGENT \
+       /---------\
+      /     *     \
+     /-------------\
+    *-------*-------*
+```
 
 > 🔥 **Battle-tested by 1500+ hackers!**
 > 
@@ -11,7 +23,7 @@
 > - RAM/CPU exhaustion (zip bombs, infinite loops, fork bombs)
 > - Container escape attempts
 > 
-> **Result: 0 secrets leaked, 0 downtime.**
+> **Result: 0 secrets leaked, 0 downtime. The Pentagram holds.**
 
 ## Architecture
 
@@ -137,15 +149,34 @@ Web panel at `:3000` for managing the system:
 - **Logs** — real-time service logs
 - **Access Control** — public/admin-only/allowlist modes
 
-## Access Control
+## Access Control (OpenClaw-style)
 
-Three modes managed via admin panel:
+Four modes managed via bot commands or admin panel:
 
 | Mode | Description |
 |------|-------------|
-| **Public** | Anyone can use bot/userbot |
-| **Admin Only** | Only admin (ID 809532582) |
+| **Admin Only** | Only admin can use (default, safest) |
 | **Allowlist** | Admin + configured user IDs |
+| **Pairing** | Unknown users get pairing code for approval |
+| **Public** | Anyone can use (⚠️ requires rate limiting) |
+
+### Bot Commands
+
+```bash
+/access              # Show access status (admin only)
+/access_mode admin   # Set mode
+/approve ABC123      # Approve pairing code
+/revoke 123456789    # Revoke user access
+/allow 123456789     # Add to allowlist
+```
+
+### Environment Variables
+
+```bash
+ACCESS_MODE=admin           # admin, allowlist, public, pairing
+ADMIN_USER_ID=809532582     # Your Telegram user ID
+ALLOWED_USERS=123,456,789   # Comma-separated user IDs
+```
 
 ## Dynamic Sandbox
 
@@ -178,20 +209,45 @@ docker compose logs -f
 open http://localhost:3000
 ```
 
-## Security
+## Security — The Pentagram 🔮
 
-**266+ protection patterns:**
-- 247 blocked shell command patterns
-- 19 prompt injection patterns
+> 📖 **Full security documentation:** [SECURITY.md](SECURITY.md)
 
-**Layers:**
-1. **Sandbox isolation** — each user in separate container
-2. **Workspace separation** — users can't access each other's files
-3. **Secrets via Proxy** — agent never sees API keys
-4. **Command blocking** — env, /proc, secrets paths blocked
-5. **Output sanitization** — secrets redacted from output
-6. **Rate limiting** — Telegram API, groups, reactions
-7. **Access control** — public/admin/allowlist modes
+```
+                     * THE SECURITY PENTAGRAM *
+                        
+                            [ACCESS]
+                               /\
+                              /  \
+                             / *  \
+                            / (o)  \
+                   [INPUT] /--------\ [OUTPUT]
+                            \  /\  /
+                             \/  \/
+                             /\  /\
+                            /  \/  \
+                 [SANDBOX] ---- [SECRETS]
+
+         "Per aspera ad securitatem" — 266 patterns of protection
+```
+
+| Point | Protection | Count |
+|-------|------------|-------|
+| 🔐 ACCESS | DM Policy (admin/allowlist/pairing) | 4 modes |
+| 🛡️ INPUT | Blocked commands + Injection detection | 247 + 19 |
+| 🐳 SANDBOX | Docker isolation per user | 512MB/50%CPU |
+| 🗝️ SECRETS | Proxy architecture, 0 in agent | ∞ |
+| 🔒 OUTPUT | Secret pattern + encoding detection | auto |
+
+### Security Audit
+
+```bash
+# Run security doctor (like `openclaw doctor`)
+python scripts/doctor.py
+
+# Output as JSON
+python scripts/doctor.py --json
+```
 
 ## Project Structure
 
@@ -207,11 +263,16 @@ LocalTopSH/
 │   ├── admin_api.py     # Admin panel API
 │   ├── security.py      # Blocked patterns
 │   ├── tools/           # Tool executors
+│   │   └── permissions.py  # Tool allowlist/denylist
 │   └── Dockerfile
+│
+├── scripts/              # CLI tools
+│   └── doctor.py        # Security audit (like openclaw doctor)
 │
 ├── bot/                  # Telegram Bot (Python/aiogram)
 │   ├── main.py
 │   ├── handlers.py
+│   ├── access.py        # DM Policy (OpenClaw-style)
 │   ├── thoughts.py      # Autonomous messages
 │   ├── security.py      # Prompt injection
 │   └── Dockerfile

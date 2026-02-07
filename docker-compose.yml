@@ -117,8 +117,13 @@ services:
       - BOT_PORT=4001
       - MAX_CONCURRENT_USERS=10
       - ADMIN_USER_ID=${ADMIN_USER_ID:-809532582}
+      # Access Control (admin, allowlist, public, pairing)
+      - ACCESS_MODE=${ACCESS_MODE:-admin}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
     secrets:
       - telegram_token
+    volumes:
+      - ./workspace/_shared:/data  # For pairing.json storage
     networks:
       - agent-net
     deploy:
@@ -167,12 +172,13 @@ services:
           memory: 256M
 
   # ============ ADMIN - React Web Panel ============
+  # SECURITY: Bound to localhost only - use SSH tunnel for remote access
   admin:
     build: ./admin
     container_name: admin
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"  # localhost only!
     depends_on:
       core:
         condition: service_healthy

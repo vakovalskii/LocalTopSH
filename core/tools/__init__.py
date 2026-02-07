@@ -287,6 +287,7 @@ from tools.send_file import tool_send_file
 from tools.send_dm import tool_send_dm
 from tools.message import tool_manage_message
 from tools.ask_user import tool_ask_user
+from tools.permissions import check_tool_permission, filter_tools_for_session
 
 
 # Tool registry
@@ -312,7 +313,23 @@ TOOL_EXECUTORS = {
 
 
 async def execute_tool(name: str, args: dict, ctx: ToolContext) -> ToolResult:
-    """Execute a tool by name"""
+    """Execute a tool by name with permission check"""
+    
+    # Check tool permission based on session type
+    perm = check_tool_permission(
+        tool_name=name,
+        session_type=ctx.chat_type,
+        source=ctx.source
+    )
+    
+    if not perm.allowed:
+        log_tool_call(name, args)
+        log_tool_result(False, None, f"PERMISSION DENIED: {perm.reason}")
+        return ToolResult(
+            False, 
+            error=f"🔒 Tool '{name}' not available in {perm.session_type} sessions. {perm.reason}"
+        )
+    
     executor = TOOL_EXECUTORS.get(name)
     if not executor:
         return ToolResult(False, error=f"Unknown tool: {name}")

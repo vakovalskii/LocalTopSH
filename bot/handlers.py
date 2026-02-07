@@ -25,6 +25,7 @@ from reactions import should_react, get_smart_reaction, get_random_done_emoji
 from security import detect_prompt_injection
 from api import call_core, clear_session
 from thoughts import mark_chat_active
+from access import access_control, check_user_access
 
 
 def should_respond(message: Message) -> tuple[bool, str, bool]:
@@ -122,6 +123,87 @@ async def cmd_afk(message: Message):
     await message.reply(f"Ладно, {reason}. Буду через {minutes} мин ✌️")
 
 
+# ============ ACCESS CONTROL COMMANDS ============
+
+@dp.message(Command("access"))
+async def cmd_access(message: Message):
+    """Show access control status (admin only)"""
+    user_id = message.from_user.id
+    if user_id != ADMIN_USER_ID:
+        await message.reply("🔒 Admin only")
+        return
+    
+    status = access_control.get_status()
+    await message.reply(
+        f"<b>🛡️ Access Control</b>\n\n"
+        f"Mode: <code>{status['mode']}</code>\n"
+        f"Allowlist: {status['allowlist_count']} users\n"
+        f"Approved: {status['approved_count']} users\n"
+        f"Pending codes: {status['pending_codes']}\n\n"
+        f"<b>Commands:</b>\n"
+        f"/access_mode &lt;admin|allowlist|public|pairing&gt;\n"
+        f"/approve &lt;CODE&gt; - Approve pairing code\n"
+        f"/revoke &lt;user_id&gt; - Revoke access\n"
+        f"/allow &lt;user_id&gt; - Add to allowlist"
+    )
+
+
+@dp.message(Command("access_mode"))
+async def cmd_access_mode(message: Message):
+    """Change access mode (admin only)"""
+    user_id = message.from_user.id
+    args = message.text.split()[1:] if message.text else []
+    
+    if not args:
+        await message.reply("Usage: /access_mode <admin|allowlist|public|pairing>")
+        return
+    
+    success, msg = access_control.set_mode(args[0], user_id)
+    await message.reply(msg)
+
+
+@dp.message(Command("approve"))
+async def cmd_approve(message: Message):
+    """Approve pairing code (admin only)"""
+    user_id = message.from_user.id
+    args = message.text.split()[1:] if message.text else []
+    
+    if not args:
+        await message.reply("Usage: /approve <CODE>")
+        return
+    
+    success, msg = access_control.approve_user(args[0], user_id)
+    await message.reply(msg)
+
+
+@dp.message(Command("revoke"))
+async def cmd_revoke(message: Message):
+    """Revoke user access (admin only)"""
+    user_id = message.from_user.id
+    args = message.text.split()[1:] if message.text else []
+    
+    if not args or not args[0].isdigit():
+        await message.reply("Usage: /revoke <user_id>")
+        return
+    
+    success, msg = access_control.revoke_user(int(args[0]), user_id)
+    await message.reply(msg)
+
+
+@dp.message(Command("allow"))
+async def cmd_allow(message: Message):
+    """Add user to allowlist (admin only)"""
+    user_id = message.from_user.id
+    args = message.text.split()[1:] if message.text else []
+    
+    if not args or not args[0].isdigit():
+        await message.reply("Usage: /allow <user_id>")
+        return
+    
+    success, msg = access_control.add_to_allowlist(int(args[0]), user_id)
+    await message.reply(msg)
+
+
 # ============ MESSAGE HANDLER ============
 
 @dp.message(F.text)
@@ -152,6 +234,23 @@ async def handle_message(message: Message):
     # Check if should respond
     respond, text, is_random = should_respond(message)
     if not respond or not text:
+        return
+    
+    # ACCESS CONTROL CHECK
+    chat_type_str = chat_type.value if hasattr(chat_type, 'value') else str(chat_type)
+    access_result = check_user_access(user_id, chat_type_str)
+    
+    if not access_result.allowed:
+        # Pairing mode - show code
+        if access_result.pairing_code:
+            await set_reaction(chat_id, message_id, "🔐")
+            await rate_limiter.safe_send(chat_id, message.reply(access_result.reason))
+        else:
+            # Admin-only or not in allowlist
+            await set_reaction(chat_id, message_id, "🚫")
+            # Don't spam with denial messages in groups
+            if chat_type == ChatType.PRIVATE:
+                await rate_limiter.safe_send(chat_id, message.reply(access_result.reason))
         return
     
     is_private = chat_type == ChatType.PRIVATE
