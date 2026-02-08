@@ -76,7 +76,7 @@ async def search_tools(query: str = "", source: str = "all", limit: int = 10):
         # Filter by source
         if source != "all":
             tool_source = tool.get("source", "builtin")
-            if source == "builtin" and tool_source != "builtin":
+            if source == "builtin" and not tool_source.startswith("builtin"):
                 continue
             if source == "mcp" and not tool_source.startswith("mcp:"):
                 continue
@@ -151,7 +151,11 @@ async def get_base_tools():
         "run_command", "read_file", "write_file", "edit_file",
         "list_directory", "search_files", "search_text",
         "memory", "manage_tasks", 
-        "search_tools", "load_tools"  # Tool discovery
+        "search_tools", "load_tools",  # Tool discovery
+        # Web and Telegram
+        "search_web", "fetch_page",
+        "telegram_channel", "telegram_send", "telegram_dialogs",
+        "telegram_history", "telegram_join"
     ]
     
     tools = get_all_tools_with_state(SHARED_TOOLS, mcp_cache, skills_manager, None)

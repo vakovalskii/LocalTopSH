@@ -5,10 +5,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
+import aiohttp
 from typing import Callable, Any
 from logger import log_tool_call, log_tool_result
 from config import CONFIG
 from models import ToolResult, ToolContext
+
+TOOLS_API_URL = os.getenv("TOOLS_API_URL", "http://tools-api:8100")
 
 
 # Tool definitions for OpenAI
@@ -485,6 +488,39 @@ TOOL_EXECUTORS = {
 }
 
 
+async def call_mcp_tool(server_name: str, tool_name: str, args: dict) -> ToolResult:
+    """Call MCP tool via tools-api"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{TOOLS_API_URL}/mcp/call/{server_name}/{tool_name}",
+                json=args,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("success"):
+                        result = data.get("result", {})
+                        # Extract content from MCP response
+                        if isinstance(result, dict):
+                            content = result.get("content", [])
+                            if content and isinstance(content, list):
+                                # Join text content
+                                texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+                                output = "\n".join(texts) if texts else str(result)
+                            else:
+                                output = str(result)
+                        else:
+                            output = str(result)
+                        return ToolResult(True, output=output)
+                    else:
+                        return ToolResult(False, error=data.get("error", "MCP call failed"))
+                else:
+                    return ToolResult(False, error=f"MCP API error: {resp.status}")
+    except Exception as e:
+        return ToolResult(False, error=f"MCP call failed: {e}")
+
+
 async def execute_tool(name: str, args: dict, ctx: ToolContext) -> ToolResult:
     """Execute a tool by name with permission check"""
     
@@ -503,11 +539,29 @@ async def execute_tool(name: str, args: dict, ctx: ToolContext) -> ToolResult:
             error=f"🔒 Tool '{name}' not available in {perm.session_type} sessions. {perm.reason}"
         )
     
+    log_tool_call(name, args)
+    
+    # Check for MCP tools (format: mcp_{server}_{tool})
+    if name.startswith("mcp_"):
+        parts = name.split("_", 2)  # mcp, server, tool_name
+        if len(parts) >= 3:
+            server_name = parts[1]
+            tool_name = "_".join(parts[2:])  # Handle tool names with underscores
+            try:
+                result = await asyncio.wait_for(
+                    call_mcp_tool(server_name, tool_name, args),
+                    timeout=CONFIG.tool_timeout
+                )
+                log_tool_result(result.success, result.output, result.error)
+                return result
+            except asyncio.TimeoutError:
+                return ToolResult(False, error=f"MCP tool {name} timed out")
+            except Exception as e:
+                return ToolResult(False, error=f"MCP tool error: {e}")
+    
     executor = TOOL_EXECUTORS.get(name)
     if not executor:
         return ToolResult(False, error=f"Unknown tool: {name}")
-    
-    log_tool_call(name, args)
     
     try:
         result = await asyncio.wait_for(

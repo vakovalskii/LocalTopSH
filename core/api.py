@@ -1,5 +1,6 @@
 """FastAPI HTTP API"""
 
+import os
 import aiohttp
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -121,7 +122,7 @@ async def chat(req: ChatRequest):
     
     # Check access mode
     mode = access.get("mode", "admin_only")
-    admin_id = access.get("admin_id", 809532582)
+    admin_id = access.get("admin_id", int(os.getenv("ADMIN_USER_ID", "0")))
     allowlist = access.get("allowlist", [])
     
     has_access = False

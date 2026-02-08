@@ -271,7 +271,7 @@ def load_config():
             "bot_enabled": True,
             "userbot_enabled": True,
             "mode": _default_access_mode(),
-            "admin_id": int(os.getenv("ADMIN_USER_ID", "809532582")),
+            "admin_id": int(os.getenv("ADMIN_USER_ID", "0")),  # 0 = not set, configure via UI
             "allowlist": []  # list of user_ids
         }
     }
@@ -329,7 +329,7 @@ async def get_access():
         "bot_enabled": access.get("bot_enabled", True),
         "userbot_enabled": access.get("userbot_enabled", True),
         "mode": access.get("mode", "admin_only"),
-        "admin_id": access.get("admin_id", 809532582)
+        "admin_id": access.get("admin_id", int(os.getenv("ADMIN_USER_ID", "0")))
     }
 
 
@@ -369,6 +369,24 @@ async def set_access_mode(data: AccessModeUpdate):
     return {"success": True, "mode": data.mode}
 
 
+class AdminIdUpdate(BaseModel):
+    admin_id: int
+
+
+@router.put("/access/admin")
+async def set_admin_id(data: AdminIdUpdate):
+    """Set admin user ID"""
+    if data.admin_id <= 0:
+        raise HTTPException(400, "Invalid admin_id. Must be a positive Telegram user ID")
+    
+    config = load_config()
+    if "access" not in config:
+        config["access"] = {}
+    config["access"]["admin_id"] = data.admin_id
+    save_config(config)
+    return {"success": True, "admin_id": data.admin_id}
+
+
 @router.get("/access/allowlist")
 async def get_allowlist():
     """Get current allowlist"""
@@ -376,7 +394,7 @@ async def get_allowlist():
     access = config.get("access", {})
     return {
         "allowlist": access.get("allowlist", []),
-        "admin_id": access.get("admin_id", 809532582)
+        "admin_id": access.get("admin_id", int(os.getenv("ADMIN_USER_ID", "0")))
     }
 
 

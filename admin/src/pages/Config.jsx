@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getConfig, updateConfig, getServices, stopService, startService, getAccess, setAccessMode, getAllowlist, updateAllowlist } from '../api'
+import { getConfig, updateConfig, getServices, stopService, startService, getAccess, setAccessMode, setAdminId, getAllowlist, updateAllowlist } from '../api'
 
 function Config() {
   const [config, setConfig] = useState({})
@@ -7,6 +7,8 @@ function Config() {
   const [access, setAccess] = useState(null)
   const [allowlist, setAllowlist] = useState([])
   const [newUserId, setNewUserId] = useState('')
+  const [editingAdminId, setEditingAdminId] = useState(false)
+  const [newAdminId, setNewAdminId] = useState('')
   const [loading, setLoading] = useState(true)
   const [servicesLoading, setServicesLoading] = useState(true)
   const [toggling, setToggling] = useState(null)
@@ -38,6 +40,24 @@ function Config() {
       await setAccessMode(mode)
       setAccess(prev => ({ ...prev, mode }))
       setToast({ type: 'success', message: `Mode set to: ${mode}` })
+    } catch (e) {
+      setToast({ type: 'error', message: e.message })
+    }
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  async function handleAdminIdSave() {
+    const adminId = parseInt(newAdminId)
+    if (!adminId || isNaN(adminId) || adminId <= 0) {
+      setToast({ type: 'error', message: 'Enter valid Telegram user ID' })
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
+    try {
+      await setAdminId(adminId)
+      setAccess(prev => ({ ...prev, admin_id: adminId }))
+      setEditingAdminId(false)
+      setToast({ type: 'success', message: `Admin ID set to: ${adminId}` })
     } catch (e) {
       setToast({ type: 'error', message: e.message })
     }
@@ -184,6 +204,65 @@ function Config() {
               </p>
             </div>
             
+            {/* Admin ID */}
+            <div style={{ marginBottom: '24px' }}>
+              <h4 style={{ marginBottom: '12px' }}>👑 Admin User</h4>
+              <div style={{ 
+                padding: '12px 16px', 
+                background: '#1a1a2a', 
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                {editingAdminId ? (
+                  <>
+                    <input 
+                      type="text"
+                      className="form-input"
+                      placeholder="Telegram User ID"
+                      value={newAdminId}
+                      onChange={e => setNewAdminId(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button className="btn btn-primary" onClick={handleAdminIdSave}>
+                      ✓ Save
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => setEditingAdminId(false)}>
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <span style={{ color: '#888', fontSize: '13px' }}>Admin ID: </span>
+                      <span style={{ fontFamily: 'monospace', fontSize: '15px' }}>
+                        {access?.admin_id || 'Not set'}
+                      </span>
+                      {!access?.admin_id || access?.admin_id === 0 ? (
+                        <span style={{ color: '#e74c3c', fontSize: '12px', marginLeft: '8px' }}>
+                          ⚠️ Configure admin ID!
+                        </span>
+                      ) : null}
+                    </div>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => {
+                        setNewAdminId(access?.admin_id?.toString() || '')
+                        setEditingAdminId(true)
+                      }}
+                    >
+                      ✏️ Edit
+                    </button>
+                  </>
+                )}
+              </div>
+              <p style={{ color: '#888', fontSize: '12px', marginTop: '6px' }}>
+                Get your Telegram ID from @userinfobot
+              </p>
+            </div>
+
             {/* Access Mode */}
             <div style={{ marginBottom: '24px' }}>
               <h4 style={{ marginBottom: '12px' }}>🎯 Access Mode</h4>
@@ -208,7 +287,7 @@ function Config() {
                 </button>
               </div>
               <p style={{ color: '#888', fontSize: '13px', marginTop: '8px' }}>
-                {access?.mode === 'admin_only' && '🔒 Only admin (809532582) can use the bot'}
+                {access?.mode === 'admin_only' && `🔒 Only admin (${access?.admin_id || 'not set'}) can use the bot`}
                 {access?.mode === 'allowlist' && '📋 Admin + users in allowlist can use the bot'}
                 {access?.mode === 'public' && '⚠️ Everyone can use the bot'}
               </p>

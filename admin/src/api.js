@@ -77,6 +77,10 @@ export const setAccessMode = (mode) => fetchApi('/access/mode', {
   method: 'PUT',
   body: JSON.stringify({ mode })
 })
+export const setAdminId = (admin_id) => fetchApi('/access/admin', {
+  method: 'PUT',
+  body: JSON.stringify({ admin_id })
+})
 export const getAllowlist = () => fetchApi('/access/allowlist')
 export const updateAllowlist = (user_id, action) => fetchApi('/access/allowlist', {
   method: 'POST',
