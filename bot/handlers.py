@@ -28,6 +28,26 @@ from thoughts import mark_chat_active
 from access import access_control, check_user_access
 
 
+def _message_mentions_bot(message: Message, bot_id: int, bot_username: str) -> bool:
+    """True if message mentions the bot via @username (any case) or via entity (text_mention)."""
+    if not message.text:
+        return False
+    # Plain text: @username case-insensitive
+    if bot_username and ("@" + bot_username).lower() in message.text.lower():
+        return True
+    # Entity-based: mention or text_mention
+    if not getattr(message, "entities", None):
+        return False
+    for ent in message.entities:
+        if ent.type == "text_mention" and getattr(ent, "user", None) and ent.user.id == bot_id:
+            return True
+        if ent.type == "mention" and message.text:
+            mention_text = message.text[ent.offset : ent.offset + ent.length]
+            if bot_username and mention_text.lower() == ("@" + bot_username).lower():
+                return True
+    return False
+
+
 def should_respond(message: Message) -> tuple[bool, str, bool]:
     """Check if bot should respond. Returns (should_respond, text, is_random)"""
     if not message.text:
@@ -44,7 +64,7 @@ def should_respond(message: Message) -> tuple[bool, str, bool]:
         from state import bot_id, bot_username
         reply = message.reply_to_message
         reply_to_bot = reply and (reply.from_user.id == bot_id or reply.from_user.username == bot_username)
-        mentions_bot = bot_username and f"@{bot_username}" in message.text
+        mentions_bot = _message_mentions_bot(message, bot_id, bot_username or "")
         
         if reply_to_bot or mentions_bot:
             clean_text = message.text
