@@ -37,3 +37,4 @@ secrets/
 .cursor/
 userbot/session/*.session
 # commit-notify
+# hook-fix
