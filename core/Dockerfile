@@ -29,10 +29,14 @@ COPY tests/ ./tests/
 COPY src/agent/system.txt ./src/agent/
 COPY src/approvals/blocked-patterns.json ./src/approvals/
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create workspace and Google credentials directory
 RUN mkdir -p /workspace && chmod 777 /workspace && \
     mkdir -p /data/google_creds && chmod 777 /data/google_creds
 
 ENV AGENT_CWD=/workspace
 
-CMD ["python", "-u", "main.py"]
+ENTRYPOINT ["/entrypoint.sh"]

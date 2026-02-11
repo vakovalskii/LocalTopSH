@@ -7,7 +7,10 @@ set -e
 echo "🔧 Setting up LocalTopSH..."
 
 # Create directories
-mkdir -p secrets workspace
+mkdir -p secrets workspace workspace/_shared
+
+# Set workspace permissions for Docker containers
+chmod -R 777 workspace
 
 # Required secrets (must be filled!)
 if [ ! -f secrets/telegram_token.txt ]; then

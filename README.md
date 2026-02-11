@@ -73,16 +73,30 @@ llama-server -m your-model.gguf --port 8000
 git clone https://github.com/vakovalskii/topsha
 cd topsha
 
+# Run setup script (creates directories with correct permissions)
+./setup.sh
+
+# Edit secrets with your credentials
+nano secrets/telegram_token.txt  # Your bot token from @BotFather
+nano secrets/base_url.txt        # http://your-llm-server:8000/v1
+nano secrets/api_key.txt          # Your API key (or "dummy" if not needed)
+nano secrets/model_name.txt       # Model name (e.g. gpt-oss-120b)
+nano secrets/zai_api_key.txt      # Z.AI search key (optional)
+```
+
+**Alternative (manual setup):**
+
+```bash
+# Create directories
+mkdir -p secrets workspace workspace/_shared
+chmod -R 777 workspace  # Important: Docker containers need write access
+
 # Create secrets
-mkdir secrets
 echo "your-telegram-token" > secrets/telegram_token.txt
 echo "http://your-llm-server:8000/v1" > secrets/base_url.txt
-echo "dummy" > secrets/api_key.txt  # or real key if required
-echo "gpt-oss-120b" > secrets/model_name.txt
-echo "your-zai-key" > secrets/zai_api_key.txt
-
-# Set permissions for Docker
-chmod 644 secrets/*.txt
+echo "dummy" > secrets/api_key.txt
+echo "changeme123" > secrets/admin_password.txt
+chmod 600 secrets/*.txt
 ```
 
 ### 3. Deploy
@@ -340,6 +354,75 @@ ssh -L 3000:localhost:3000 user@your-server
 - **High-volume workloads** — pay for GPU, not per-token
 - **Predictable costs** — no surprise API bills
 - **Scale without limits** — your hardware, your rules
+
+---
+
+## Troubleshooting
+
+### Permission Denied Errors
+
+**Symptom:** `500 Internal Server Error` when changing access mode, or errors like:
+```
+Permission denied: '/workspace/_shared/admin_config.json'
+Permission denied: '/workspace/123456789/'
+```
+
+**Cause:** Docker containers (running as `root`) can't write to bind-mounted `workspace/` directory.
+
+**Solution:**
+```bash
+# Fix permissions on host
+chmod -R 777 workspace/
+
+# Or run setup script again
+./setup.sh
+```
+
+**Prevention:** Always use `./setup.sh` for initial setup — it creates directories with correct permissions.
+
+### Bot Not Responding
+
+**Symptom:** Bot shows online but doesn't reply to messages.
+
+**Diagnosis:**
+1. Check if `core` container is running: `docker ps | grep core`
+2. Check logs: `docker logs core --tail 50`
+3. Verify access mode: Admin panel → Config → Access
+
+**Common causes:**
+- Access mode set to `admin_only` but `ADMIN_USER_ID` not configured
+- Bot token invalid or expired
+- LLM API unreachable (check `base_url` in secrets)
+
+**Solution:**
+```bash
+# Set admin user ID
+echo "YOUR_TELEGRAM_ID" > .env
+# Add line: ADMIN_USER_ID=123456789
+
+# Or set access mode to public (for testing)
+docker compose restart core
+```
+
+### Containers Keep Restarting
+
+**Symptom:** `docker ps` shows containers constantly restarting.
+
+**Diagnosis:**
+```bash
+docker logs core --tail 100
+docker logs bot --tail 100
+```
+
+**Common causes:**
+- Missing or invalid secrets (telegram_token, api_key, base_url)
+- LLM server not accessible
+- Port conflicts (3000, 4000, 4001 already in use)
+
+**Solution:**
+1. Verify all required secrets exist and are valid
+2. Test LLM connection: `curl http://your-llm-server:8000/v1/models`
+3. Check port availability: `netstat -tuln | grep -E '3000|4000|4001'`
 
 ---
 
