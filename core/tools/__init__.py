@@ -543,11 +543,32 @@ async def execute_tool(name: str, args: dict, ctx: ToolContext) -> ToolResult:
     log_tool_call(name, args)
     
     # Check for MCP tools (format: mcp_{server}_{tool})
+    # Example: mcp_google_workspace_search_gmail_messages
+    # Need to extract server name from tool source (mcp:google_workspace)
     if name.startswith("mcp_"):
-        parts = name.split("_", 2)  # mcp, server, tool_name
-        if len(parts) >= 3:
-            server_name = parts[1]
-            tool_name = "_".join(parts[2:])  # Handle tool names with underscores
+        # Remove "mcp_" prefix
+        name_without_prefix = name[4:]
+        
+        # Try to find the server by checking which MCP server has this tool
+        # For now, use a simple heuristic: check common server names
+        server_name = None
+        tool_name = None
+        
+        # Try common patterns: google_workspace, docker, test
+        for possible_server in ["google_workspace", "docker", "test"]:
+            if name_without_prefix.startswith(possible_server + "_"):
+                server_name = possible_server
+                tool_name = name_without_prefix[len(possible_server) + 1:]
+                break
+        
+        # Fallback: assume single-word server name (first part before underscore)
+        if not server_name:
+            parts = name_without_prefix.split("_", 1)
+            if len(parts) >= 2:
+                server_name = parts[0]
+                tool_name = parts[1]
+        
+        if server_name and tool_name:
             try:
                 result = await asyncio.wait_for(
                     call_mcp_tool(server_name, tool_name, args),
