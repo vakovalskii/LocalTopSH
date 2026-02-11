@@ -1179,6 +1179,132 @@ async def update_search_config(data: SearchConfigUpdate):
     return {"success": True, **config}
 
 
+# ============ ZAI API KEY ============
+
+ZAI_SECRET_FILE = "/data/secrets/zai_api_key.txt"
+ZAI_DOCKER_SECRET = "/run/secrets/zai_api_key"
+
+
+def _get_zai_key() -> str:
+    """Get ZAI API key from data volume or Docker secret"""
+    # Приоритет: data volume > Docker secret
+    for path in [ZAI_SECRET_FILE, ZAI_DOCKER_SECRET, f"{ZAI_DOCKER_SECRET}.txt"]:
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    value = f.read().strip()
+                    if value:
+                        return value
+            except:
+                pass
+    return ""
+
+
+def _save_zai_key(key: str):
+    """Save ZAI API key to data volume"""
+    os.makedirs(os.path.dirname(ZAI_SECRET_FILE), exist_ok=True)
+    with open(ZAI_SECRET_FILE, "w") as f:
+        f.write(key.strip())
+
+
+def _mask_key(key: str) -> str:
+    """Mask API key for display (show first 8 and last 4 chars)"""
+    if not key or len(key) < 16:
+        return "***" if key else ""
+    return f"{key[:8]}...{key[-4:]}"
+
+
+class ZAIKeyUpdate(BaseModel):
+    api_key: str
+
+
+@router.get("/search/key")
+async def get_zai_key_status():
+    """Get ZAI API key status (masked)"""
+    key = _get_zai_key()
+    return {
+        "configured": bool(key),
+        "masked_key": _mask_key(key),
+        "source": "data" if os.path.exists(ZAI_SECRET_FILE) else ("docker_secret" if key else "none")
+    }
+
+
+@router.put("/search/key")
+async def update_zai_key(data: ZAIKeyUpdate):
+    """Set ZAI API key
+    
+    Сохраняет ключ в /data/secrets/zai_api_key.txt
+    Требуется перезапуск proxy для применения.
+    """
+    if not data.api_key or len(data.api_key) < 10:
+        raise HTTPException(400, "API key is too short")
+    
+    _save_zai_key(data.api_key)
+    
+    # Также создадим симлинк для secrets директории если нужно
+    secrets_dir = "/workspace/_shared/secrets"
+    os.makedirs(secrets_dir, exist_ok=True)
+    secrets_file = os.path.join(secrets_dir, "zai_api_key.txt")
+    with open(secrets_file, "w") as f:
+        f.write(data.api_key.strip())
+    
+    return {
+        "success": True, 
+        "masked_key": _mask_key(data.api_key),
+        "note": "Restart proxy container to apply: docker compose up -d --build proxy"
+    }
+
+
+class ZAITestRequest(BaseModel):
+    api_key: Optional[str] = None  # If not provided, use saved key
+
+
+@router.post("/search/test")
+async def test_zai_connection(data: ZAITestRequest = None):
+    """Test ZAI API connection
+    
+    Тестирует подключение к Z.AI API с указанным или сохранённым ключом.
+    """
+    import aiohttp
+    
+    key = data.api_key if data and data.api_key else _get_zai_key()
+    if not key:
+        return {"status": "error", "error": "No API key configured"}
+    
+    # Test with a simple search query
+    url = "https://api.z.ai/api/paas/v4/web_search"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}"
+    }
+    body = {
+        "search_engine": "search-prime",
+        "search_query": "test",
+        "count": 1
+    }
+    
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=body, headers=headers) as resp:
+                if resp.status == 200:
+                    return {
+                        "status": "ready",
+                        "message": "Z.AI API connection successful"
+                    }
+                elif resp.status == 401:
+                    return {"status": "error", "error": "Invalid API key (401 Unauthorized)"}
+                elif resp.status == 403:
+                    return {"status": "error", "error": "Access denied (403 Forbidden)"}
+                else:
+                    text = await resp.text()
+                    return {"status": "error", "error": f"HTTP {resp.status}: {text[:100]}"}
+    except asyncio.TimeoutError:
+        return {"status": "error", "error": "Connection timeout"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 # ============ LOCALE (Language) ============
 
 LOCALE_CONFIG_FILE = "/data/bot_locale.json"
@@ -1302,6 +1428,8 @@ DEFAULT_ASR_CONFIG = {
     "language": "ru",
     "max_duration": 120,
     "timeout": 60,
+    "api_key": "",  # Bearer token для авторизации
+    "api_type": "openai",  # "openai" или "faster-whisper"
 }
 
 
@@ -1311,6 +1439,8 @@ class ASRConfigUpdate(BaseModel):
     language: Optional[str] = None
     max_duration: Optional[int] = None
     timeout: Optional[int] = None
+    api_key: Optional[str] = None  # Bearer token
+    api_type: Optional[str] = None  # "openai" или "faster-whisper"
 
 
 @router.get("/asr")
@@ -1349,8 +1479,7 @@ async def update_asr_config(data: ASRConfigUpdate):
 
 @router.get("/asr/health")
 async def check_asr_health():
-    """Check ASR server health"""
-    import aiohttp
+    """Check ASR server health using saved config"""
     config = DEFAULT_ASR_CONFIG.copy()
     try:
         if os.path.exists(ASR_CONFIG_FILE):
@@ -1359,19 +1488,79 @@ async def check_asr_health():
     except:
         pass
     
+    return await _test_asr_connection(config)
+
+
+class ASRTestRequest(BaseModel):
+    url: str
+    api_type: str = "openai"
+    api_key: str = ""
+
+
+@router.post("/asr/test")
+async def test_asr_connection(data: ASRTestRequest):
+    """Test ASR connection with custom parameters (without saving)
+    
+    Позволяет протестировать подключение до сохранения настроек.
+    """
+    config = {
+        "url": data.url,
+        "api_type": data.api_type,
+        "api_key": data.api_key,
+        "enabled": True
+    }
+    return await _test_asr_connection(config)
+
+
+async def _test_asr_connection(config: dict) -> dict:
+    """Internal helper to test ASR connection
+    
+    Поддерживает оба типа серверов:
+    - OpenAI-compatible: проверяет /docs или базовый URL  
+    - Faster-Whisper: проверяет /health/ready
+    
+    Args:
+        config: ASR configuration dict with url, api_type, api_key, enabled
+    
+    Returns:
+        dict: Status response with connection result
+    """
+    import aiohttp
+    
     url = config.get("url", "")
-    if not url:
+    if not url or not config.get("enabled", True):
         return {"status": "disabled", "url": ""}
+    
+    api_type = config.get("api_type", "openai")
+    api_key = config.get("api_key", "")
     
     try:
         timeout = aiohttp.ClientTimeout(total=5)
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(f"{url}/health/ready") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    data["url"] = url
-                    return data
-                return {"status": "error", "url": url, "http_status": resp.status}
+            if api_type == "openai":
+                # OpenAI-compatible: проверяем /docs (FastAPI swagger)
+                async with session.get(f"{url}/docs", headers=headers) as resp:
+                    if resp.status in (200, 307):
+                        return {
+                            "status": "ready",
+                            "url": url,
+                            "api_type": "openai",
+                            "note": "OpenAI-compatible API"
+                        }
+                    return {"status": "error", "url": url, "http_status": resp.status}
+            else:
+                # Faster-Whisper: проверяем /health/ready
+                async with session.get(f"{url}/health/ready") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        data["url"] = url
+                        data["api_type"] = "faster-whisper"
+                        return data
+                    return {"status": "error", "url": url, "http_status": resp.status}
     except Exception as e:
         return {"status": "error", "url": url, "error": str(e)}
 

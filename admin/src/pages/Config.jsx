@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getConfig, updateConfig, getServices, stopService, startService, getAccess, setAccessMode, setAdminId, getAllowlist, updateAllowlist, getSearchConfig, updateSearchConfig, getASRConfig, updateASRConfig, getASRHealth, getTimezone, updateTimezone, getLocale, updateLocale } from '../api'
+import { getConfig, updateConfig, getServices, stopService, startService, getAccess, setAccessMode, setAdminId, getAllowlist, updateAllowlist, getSearchConfig, updateSearchConfig, getZAIKeyStatus, updateZAIKey, testZAIConnection, getASRConfig, updateASRConfig, getASRHealth, testASRConnection, getTimezone, updateTimezone, getLocale, updateLocale } from '../api'
 import { useT } from '../i18n'
 
 function Config() {
@@ -19,9 +19,14 @@ function Config() {
   const [activeTab, setActiveTab] = useState('access')
   const [searchConfig, setSearchConfig] = useState(null)
   const [searchSaving, setSearchSaving] = useState(false)
+  const [zaiKeyStatus, setZaiKeyStatus] = useState(null)
+  const [zaiKeyInput, setZaiKeyInput] = useState('')
+  const [zaiKeySaving, setZaiKeySaving] = useState(false)
+  const [zaiTesting, setZaiTesting] = useState(false)
   const [asrConfig, setAsrConfig] = useState(null)
   const [asrSaving, setAsrSaving] = useState(false)
   const [asrHealth, setAsrHealth] = useState(null)
+  const [asrTesting, setAsrTesting] = useState(false)
   const [tzData, setTzData] = useState(null)
   const [tzSaving, setTzSaving] = useState(false)
   const [selectedTz, setSelectedTz] = useState('')
@@ -43,8 +48,53 @@ function Config() {
     try {
       const data = await getSearchConfig()
       setSearchConfig(data)
+      // Also load ZAI key status
+      try {
+        const keyStatus = await getZAIKeyStatus()
+        setZaiKeyStatus(keyStatus)
+      } catch (e) {
+        console.error('Failed to load ZAI key status:', e)
+      }
     } catch (e) {
       console.error('Failed to load search config:', e)
+    }
+  }
+
+  async function handleZAIKeySave() {
+    if (!zaiKeyInput || zaiKeyInput.length < 10) {
+      setToast({ type: 'error', message: 'API key is too short' })
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
+    setZaiKeySaving(true)
+    try {
+      const result = await updateZAIKey(zaiKeyInput)
+      setZaiKeyStatus({ configured: true, masked_key: result.masked_key, source: 'data' })
+      setZaiKeyInput('')
+      setToast({ type: 'success', message: '✅ API key saved! Restart proxy to apply.' })
+    } catch (e) {
+      setToast({ type: 'error', message: e.message })
+    } finally {
+      setZaiKeySaving(false)
+      setTimeout(() => setToast(null), 5000)
+    }
+  }
+
+  async function handleZAITest() {
+    setZaiTesting(true)
+    try {
+      // Test with input key if provided, otherwise use saved key
+      const result = await testZAIConnection(zaiKeyInput || null)
+      if (result.status === 'ready') {
+        setToast({ type: 'success', message: '✅ Z.AI connection successful!' })
+      } else {
+        setToast({ type: 'error', message: result.error || 'Connection failed' })
+      }
+    } catch (e) {
+      setToast({ type: 'error', message: e.message })
+    } finally {
+      setZaiTesting(false)
+      setTimeout(() => setToast(null), 3000)
     }
   }
 
@@ -78,6 +128,34 @@ function Config() {
       setToast({ type: 'error', message: e.message })
     } finally {
       setAsrSaving(false)
+      setTimeout(() => setToast(null), 3000)
+    }
+  }
+
+  async function handleASRTest() {
+    if (!asrConfig?.url) {
+      setToast({ type: 'error', message: 'URL is required' })
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
+    setAsrTesting(true)
+    try {
+      const result = await testASRConnection(
+        asrConfig.url,
+        asrConfig.api_type || 'openai',
+        asrConfig.api_key || ''
+      )
+      setAsrHealth(result)
+      if (result.status === 'ready') {
+        setToast({ type: 'success', message: '✅ Connection successful!' })
+      } else {
+        setToast({ type: 'error', message: result.error || `Error: ${result.http_status || 'connection failed'}` })
+      }
+    } catch (e) {
+      setToast({ type: 'error', message: e.message })
+      setAsrHealth({ status: 'error', error: e.message })
+    } finally {
+      setAsrTesting(false)
       setTimeout(() => setToast(null), 3000)
     }
   }
@@ -959,6 +1037,55 @@ function Config() {
               </p>
             </div>
 
+            {/* ZAI API Key Section */}
+            <div style={{ 
+              marginBottom: '24px', 
+              padding: '16px', 
+              borderRadius: '8px', 
+              background: zaiKeyStatus?.configured ? '#1a2a1a' : '#2a1a1a',
+              border: '1px solid #333'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div>
+                  <h4 style={{ margin: 0, color: '#fff' }}>🔑 Z.AI API Key</h4>
+                  <p style={{ color: '#888', fontSize: '12px', marginTop: '4px' }}>
+                    {zaiKeyStatus?.configured 
+                      ? `Настроен: ${zaiKeyStatus.masked_key} (${zaiKeyStatus.source})` 
+                      : '❌ Не настроен — поиск не будет работать'}
+                  </p>
+                </div>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '4px 12px', fontSize: '12px' }}
+                  onClick={handleZAITest}
+                  disabled={zaiTesting}
+                >
+                  {zaiTesting ? '...' : '🔌 Тест'}
+                </button>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Введите новый API ключ Z.AI..."
+                  value={zaiKeyInput}
+                  onChange={e => setZaiKeyInput(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleZAIKeySave}
+                  disabled={zaiKeySaving || !zaiKeyInput}
+                >
+                  {zaiKeySaving ? '...' : '💾 Сохранить'}
+                </button>
+              </div>
+              <p style={{ color: '#666', fontSize: '11px', marginTop: '6px' }}>
+                После сохранения ключа перезапустите proxy: <code>docker compose up -d --build proxy</code>
+              </p>
+            </div>
+
             <div className="form-group">
               <label className="form-label">{t('config.search.mode')}</label>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -1084,11 +1211,18 @@ function Config() {
               <span style={{ fontWeight: 'bold' }}>
                 {asrHealth?.status === 'ready' ? t('config.asr.online') : asrHealth?.status === 'disabled' ? t('config.asr.disabled_status') : t('config.asr.offline')}
               </span>
+              {asrHealth?.api_type && <span style={{ color: '#888', marginLeft: '12px' }}>Type: {asrHealth.api_type}</span>}
               {asrHealth?.model_name && <span style={{ color: '#888', marginLeft: '12px' }}>Model: {asrHealth.model_name}</span>}
               {asrHealth?.device && <span style={{ color: '#888', marginLeft: '12px' }}>Device: {asrHealth.device}</span>}
               {asrHealth?.error && <span style={{ color: '#f66', marginLeft: '12px' }}>{asrHealth.error}</span>}
-              <button className="btn btn-secondary" style={{ marginLeft: '12px', padding: '4px 12px', fontSize: '12px' }} onClick={loadASRConfig}>
-                {t('common.refresh')}
+              {asrHealth?.http_status && <span style={{ color: '#f66', marginLeft: '12px' }}>HTTP {asrHealth.http_status}</span>}
+              <button 
+                className="btn btn-primary" 
+                style={{ marginLeft: '12px', padding: '4px 12px', fontSize: '12px' }} 
+                onClick={handleASRTest}
+                disabled={asrTesting}
+              >
+                {asrTesting ? '...' : '🔌 Тест подключения'}
               </button>
             </div>
 
@@ -1117,6 +1251,47 @@ function Config() {
                 {t('config.asr.url_desc')}
               </p>
             </div>
+
+            <div className="form-group">
+              <label className="form-label">API Type</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[
+                  { value: 'openai', label: '🔌 OpenAI Compatible', desc: '/v1/audio/transcriptions' },
+                  { value: 'faster-whisper', label: '⚡ Faster-Whisper', desc: '/api/v1/transcribe' }
+                ].map(type => (
+                  <button
+                    key={type.value}
+                    className={`btn ${asrConfig.api_type === type.value ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setAsrConfig(prev => ({ ...prev, api_type: type.value }))}
+                    style={{ flex: 1, textAlign: 'left', padding: '12px' }}
+                  >
+                    <div>{type.label}</div>
+                    <div style={{ fontSize: '11px', color: asrConfig.api_type === type.value ? '#adf' : '#888', marginTop: '4px' }}>
+                      {type.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p style={{ color: '#888', fontSize: '12px', marginTop: '6px' }}>
+                OpenAI Compatible for remote Whisper servers (with Bearer token). Faster-Whisper for local servers.
+              </p>
+            </div>
+
+            {asrConfig.api_type === 'openai' && (
+              <div className="form-group">
+                <label className="form-label">API Key (Bearer Token)</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="secret-token"
+                  value={asrConfig.api_key || ''}
+                  onChange={e => setAsrConfig(prev => ({ ...prev, api_key: e.target.value }))}
+                />
+                <p style={{ color: '#888', fontSize: '12px', marginTop: '4px' }}>
+                  Authorization: Bearer &lt;token&gt; for authenticated ASR endpoints
+                </p>
+              </div>
+            )}
 
             <div className="form-group">
               <label className="form-label">{t('config.asr.language')}</label>
@@ -1234,14 +1409,17 @@ function Config() {
           </>
         )}
 
-        <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? t('common.saving') : t('common.save')}
-          </button>
-          <button className="btn btn-secondary" onClick={loadConfig}>
-            {t('common.reset')}
-          </button>
-        </div>
+        {/* Show general save buttons only for tabs that don't have their own */}
+        {!['asr', 'search'].includes(activeTab) && (
+          <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? t('common.saving') : t('common.save')}
+            </button>
+            <button className="btn btn-secondary" onClick={loadConfig}>
+              {t('common.reset')}
+            </button>
+          </div>
+        )}
       </div>
 
       {toast && (

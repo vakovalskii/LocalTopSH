@@ -126,6 +126,15 @@ export const updateSearchConfig = (data) => fetchApi('/search', {
   method: 'PUT',
   body: JSON.stringify(data)
 })
+export const getZAIKeyStatus = () => fetchApi('/search/key')
+export const updateZAIKey = (api_key) => fetchApi('/search/key', {
+  method: 'PUT',
+  body: JSON.stringify({ api_key })
+})
+export const testZAIConnection = (api_key = null) => fetchApi('/search/test', {
+  method: 'POST',
+  body: JSON.stringify(api_key ? { api_key } : {})
+})
 
 // Locale
 export const getLocale = () => fetchApi('/locale')
@@ -148,6 +157,10 @@ export const updateASRConfig = (data) => fetchApi('/asr', {
   body: JSON.stringify(data)
 })
 export const getASRHealth = () => fetchApi('/asr/health')
+export const testASRConnection = (url, api_type, api_key) => fetchApi('/asr/test', {
+  method: 'POST',
+  body: JSON.stringify({ url, api_type, api_key })
+})
 
 // System Prompt
 export const getPrompt = () => fetchApi('/prompt')
@@ -182,13 +195,13 @@ export const api = {
   // Skills
   getSkills, getAvailableSkills, toggleSkill, scanSkills, installSkill, uninstallSkill,
   // Search
-  getSearchConfig, updateSearchConfig,
+  getSearchConfig, updateSearchConfig, getZAIKeyStatus, updateZAIKey, testZAIConnection,
   // Locale
   getLocale, updateLocale,
   // Timezone
   getTimezone, updateTimezone,
   // ASR
-  getASRConfig, updateASRConfig, getASRHealth,
+  getASRConfig, updateASRConfig, getASRHealth, testASRConnection,
   // Prompt
   getPrompt, updatePrompt, restorePrompt
 }
