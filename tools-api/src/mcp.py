@@ -103,30 +103,77 @@ async def fetch_mcp_tools(server: MCPServer) -> List[dict]:
     """Fetch tools from an MCP server"""
     if server.transport == "http":
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                headers = {}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                headers = {
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json"
+                }
                 if server.api_key:
                     headers["Authorization"] = f"Bearer {server.api_key}"
                 
-                # MCP uses JSON-RPC 2.0
-                response = await client.post(
-                    f"{server.url}",
+                # Try Streamable HTTP MCP first (requires session)
+                # Step 1: Initialize session
+                init_response = await client.post(
+                    server.url,
                     json={
                         "jsonrpc": "2.0",
                         "id": 1,
-                        "method": "tools/list",
-                        "params": {}
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "topsha-tools-api", "version": "1.0"}
+                        }
                     },
                     headers=headers
                 )
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    if "result" in data and "tools" in data["result"]:
-                        return data["result"]["tools"]
-                    # Fallback for non-standard MCP servers
-                    if "tools" in data:
-                        return data["tools"]
+                session_id = init_response.headers.get("mcp-session-id")
+                
+                if session_id:
+                    # Streamable HTTP MCP - use session ID
+                    headers["mcp-session-id"] = session_id
+                    response = await client.post(
+                        server.url,
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 2,
+                            "method": "tools/list",
+                            "params": {}
+                        },
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        # Parse SSE response
+                        text = response.text
+                        for line in text.split('\n'):
+                            if line.startswith('data: '):
+                                try:
+                                    data = json.loads(line[6:])
+                                    if "result" in data and "tools" in data["result"]:
+                                        return data["result"]["tools"]
+                                except:
+                                    pass
+                else:
+                    # Simple JSON-RPC (legacy MCP servers)
+                    response = await client.post(
+                        server.url,
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "tools/list",
+                            "params": {}
+                        },
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "result" in data and "tools" in data["result"]:
+                            return data["result"]["tools"]
+                        if "tools" in data:
+                            return data["tools"]
         except Exception as e:
             print(f"Error fetching tools from {server.name}: {e}")
     
@@ -138,15 +185,39 @@ async def call_mcp_tool(server: MCPServer, tool_name: str, arguments: dict) -> d
     if server.transport == "http":
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                headers = {}
+                headers = {
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json"
+                }
                 if server.api_key:
                     headers["Authorization"] = f"Bearer {server.api_key}"
                 
-                response = await client.post(
-                    f"{server.url}",
+                # Step 1: Initialize session (for Streamable HTTP MCP)
+                init_response = await client.post(
+                    server.url,
                     json={
                         "jsonrpc": "2.0",
                         "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "topsha-tools-api", "version": "1.0"}
+                        }
+                    },
+                    headers=headers
+                )
+                
+                session_id = init_response.headers.get("mcp-session-id")
+                if session_id:
+                    headers["mcp-session-id"] = session_id
+                
+                # Step 2: Call tool
+                response = await client.post(
+                    server.url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
                         "method": "tools/call",
                         "params": {
                             "name": tool_name,
@@ -157,11 +228,27 @@ async def call_mcp_tool(server: MCPServer, tool_name: str, arguments: dict) -> d
                 )
                 
                 if response.status_code == 200:
-                    data = response.json()
-                    if "result" in data:
-                        return {"success": True, "result": data["result"]}
-                    if "error" in data:
-                        return {"success": False, "error": data["error"]}
+                    text = response.text
+                    # Try SSE format first
+                    for line in text.split('\n'):
+                        if line.startswith('data: '):
+                            try:
+                                data = json.loads(line[6:])
+                                if "result" in data:
+                                    return {"success": True, "result": data["result"]}
+                                if "error" in data:
+                                    return {"success": False, "error": data["error"]}
+                            except:
+                                pass
+                    # Try plain JSON
+                    try:
+                        data = response.json()
+                        if "result" in data:
+                            return {"success": True, "result": data["result"]}
+                        if "error" in data:
+                            return {"success": False, "error": data["error"]}
+                    except:
+                        pass
                 return {"success": False, "error": f"HTTP {response.status_code}"}
         except Exception as e:
             return {"success": False, "error": str(e)}
