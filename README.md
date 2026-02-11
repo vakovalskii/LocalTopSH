@@ -70,8 +70,8 @@ llama-server -m your-model.gguf --port 8000
 ### 2. Configure LocalTopSH
 
 ```bash
-git clone https://github.com/yourrepo/LocalTopSH
-cd LocalTopSH
+git clone https://github.com/vakovalskii/topsha
+cd topsha
 
 # Create secrets
 mkdir secrets
