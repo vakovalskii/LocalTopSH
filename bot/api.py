@@ -33,7 +33,7 @@ async def call_core(
                     "source": "bot",
                     "chat_type": chat_type
                 },
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=300)  # 5 min: agent may need 20+ iterations with web search
             ) as resp:
                 if resp.status != 200:
                     print(f"[core] Error: {resp.status}")

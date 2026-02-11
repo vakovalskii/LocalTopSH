@@ -383,8 +383,8 @@ def save_config(config):
     # Ensure file is writable by all (for container user)
     try:
         os.chmod(CONFIG_FILE, 0o666)
-    except Exception as e:
-        admin_logger.warning(f"Failed to chmod {CONFIG_FILE}: {e}")
+    except Exception:
+        pass  # May fail if file owned by different user, not critical
 
 
 @router.get("/config")

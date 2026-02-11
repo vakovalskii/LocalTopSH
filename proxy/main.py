@@ -83,8 +83,20 @@ async def proxy_llm(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "LLM not configured"}, status=500)
     
     # Build target URL
+    # Support both standard OpenAI-style URLs (ending with /v1) and custom URLs
+    # If BASE_URL already contains /chat/completions, use it directly for that path
     path = request.match_info.get("path", "")
-    target_url = LLM_BASE_URL.rstrip("/v1").rstrip("/") + "/v1/" + path
+    base = LLM_BASE_URL.rstrip("/")
+    
+    if base.endswith("/chat/completions") and path == "chat/completions":
+        # Custom URL that already includes the full path (e.g. Z.AI)
+        target_url = base
+    elif base.endswith("/v1"):
+        # Standard OpenAI-style: base/v1 + /path
+        target_url = base + "/" + path
+    else:
+        # Assume base URL without /v1, add it
+        target_url = base.rstrip("/v1").rstrip("/") + "/v1/" + path
     if request.query_string:
         target_url += "?" + request.query_string
     
@@ -395,7 +407,13 @@ Respond ONLY with valid JSON, no other text."""
     
     # Note: response_format=json_object not always supported, relying on prompt instead
     
-    target_url = LLM_BASE_URL.rstrip("/v1").rstrip("/") + "/v1/chat/completions"
+    base = LLM_BASE_URL.rstrip("/")
+    if base.endswith("/chat/completions"):
+        target_url = base
+    elif base.endswith("/v1"):
+        target_url = base + "/chat/completions"
+    else:
+        target_url = base.rstrip("/v1").rstrip("/") + "/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LLM_API_KEY}"

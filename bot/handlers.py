@@ -247,12 +247,12 @@ async def handle_voice(message: Message):
     is_private = chat_type == ChatType.PRIVATE
     is_group = chat_type in (ChatType.GROUP, ChatType.SUPERGROUP)
     
-    # In groups, only respond to voice if it's a reply to bot
+    # In groups: transcribe all voice messages, but only send to agent if directed at bot
+    is_directed = True  # default for private chats
     if is_group:
         reply = message.reply_to_message
-        reply_to_bot = reply and (reply.from_user.id == bot_id or reply.from_user.username == bot_username)
-        if not reply_to_bot:
-            return
+        reply_to_bot = reply and (reply.from_user and (reply.from_user.id == bot_id or reply.from_user.username == bot_username))
+        is_directed = reply_to_bot
     
     # Access control
     chat_type_str = chat_type.value if hasattr(chat_type, 'value') else str(chat_type)
@@ -310,8 +310,24 @@ async def handle_voice(message: Message):
         message.reply(f"🎤 <i>{preview}</i>")
     )
     
-    # Process as regular text through agent
-    message_for_agent = f"[От: @{username} ({user_id})]\n[{t('voice_prefix')}]\n{transcribed_text}"
+    # In groups, if not directed at bot - just show transcription, don't call agent
+    if is_group and not is_directed:
+        await set_reaction(chat_id, message_id, "🎤")
+        return
+    
+    # Process as regular text through agent (include reply context if present)
+    reply_context = ""
+    if message.reply_to_message:
+        reply_msg = message.reply_to_message
+        reply_author = ""
+        if reply_msg.from_user:
+            reply_author = reply_msg.from_user.username or reply_msg.from_user.first_name or str(reply_msg.from_user.id)
+        reply_text = reply_msg.text or reply_msg.caption or ""
+        if reply_text:
+            reply_preview = reply_text[:500] + ("..." if len(reply_text) > 500 else "")
+            reply_context = f"[Реплай на сообщение от @{reply_author}: {reply_preview}]\n"
+    
+    message_for_agent = f"[От: @{username} ({user_id})]\n[{t('voice_prefix')}]\n{reply_context}{transcribed_text}"
     
     mark_chat_active(chat_id)
     rate_limiter.mark_active(user_id)
@@ -461,11 +477,22 @@ async def handle_message(message: Message):
         await set_reaction(chat_id, message_id, "✅")
         return
     
-    # Format message for agent
+    # Format message for agent (include reply context if present)
+    reply_context = ""
+    if message.reply_to_message:
+        reply_msg = message.reply_to_message
+        reply_author = ""
+        if reply_msg.from_user:
+            reply_author = reply_msg.from_user.username or reply_msg.from_user.first_name or str(reply_msg.from_user.id)
+        reply_text = reply_msg.text or reply_msg.caption or ""
+        if reply_text:
+            reply_preview = reply_text[:500] + ("..." if len(reply_text) > 500 else "")
+            reply_context = f"[Реплай на сообщение от @{reply_author}: {reply_preview}]\n"
+    
     if is_random:
-        message_for_agent = f"[От: @{username} ({user_id})]\n[Случайный комментарий]\n\n{text}"
+        message_for_agent = f"[От: @{username} ({user_id})]\n[Случайный комментарий]\n{reply_context}\n{text}"
     else:
-        message_for_agent = f"[От: @{username} ({user_id})]\n{text}"
+        message_for_agent = f"[От: @{username} ({user_id})]\n{reply_context}{text}"
     
     # Check concurrent users limit
     if not rate_limiter.can_accept_user(user_id):
