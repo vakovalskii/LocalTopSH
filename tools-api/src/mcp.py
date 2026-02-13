@@ -110,7 +110,7 @@ async def fetch_mcp_tools(server: MCPServer) -> List[dict]:
                 }
                 if server.api_key:
                     headers["Authorization"] = f"Bearer {server.api_key}"
-                
+
                 # Try Streamable HTTP MCP first (requires session)
                 # Step 1: Initialize session
                 init_response = await client.post(
@@ -127,7 +127,8 @@ async def fetch_mcp_tools(server: MCPServer) -> List[dict]:
                     },
                     headers=headers
                 )
-                
+                if init_response.status_code != 200:
+                    print(f"[MCP {server.name}] initialize status={init_response.status_code} body={init_response.text[:500]}")
                 session_id = init_response.headers.get("mcp-session-id")
                 
                 if session_id:
@@ -153,8 +154,11 @@ async def fetch_mcp_tools(server: MCPServer) -> List[dict]:
                                     data = json.loads(line[6:])
                                     if "result" in data and "tools" in data["result"]:
                                         return data["result"]["tools"]
-                                except:
+                                except Exception:
                                     pass
+                        print(f"[MCP {server.name}] tools/list SSE parse: no result.tools in response (len={len(text)})")
+                    else:
+                        print(f"[MCP {server.name}] tools/list status={response.status_code} body={response.text[:500]}")
                 else:
                     # Simple JSON-RPC (legacy MCP servers)
                     response = await client.post(
@@ -174,8 +178,14 @@ async def fetch_mcp_tools(server: MCPServer) -> List[dict]:
                             return data["result"]["tools"]
                         if "tools" in data:
                             return data["tools"]
+                        if "error" in data:
+                            print(f"[MCP {server.name}] tools/list JSON-RPC error: {data['error']}")
+                        else:
+                            print(f"[MCP {server.name}] tools/list unexpected JSON keys: {list(data.keys())[:10]}")
+                    else:
+                        print(f"[MCP {server.name}] tools/list status={response.status_code} body={response.text[:500]}")
         except Exception as e:
-            print(f"Error fetching tools from {server.name}: {e}")
+            print(f"[MCP {server.name}] Error fetching tools: {e}")
     
     return []
 
